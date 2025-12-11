@@ -1,0 +1,40 @@
+[package]
+name = "rootsmith"
+version = "0.1.0"
+edition = "2021"
+description = "Cryptographic accumulator app with RocksDB, pluggable backends and registries"
+license = "MIT"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rocksdb = "0.22"
+crossbeam-channel = "0.5"
+uuid = { version = "1", features = ["v4"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+opentelemetry = { version = "0.24", features = ["trace"] }
+tracing-opentelemetry = "0.27"
+
+# optional future deps:
+# tokio, rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
+
+[features]
+default = ["backend-merkle", "commitment-reg-contract", "proof-s3"]
+
+# backends
+backend-merkle = []
+backend-sparse-merkle = []
+
+# commitment registries
+commitment-reg-contract = []
+commitment-reg-none = []
+
+# proof registries
+proof-s3 = []
+proof-github = []
+proof-contract = []
+
+[dev-dependencies]
