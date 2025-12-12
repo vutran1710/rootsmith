@@ -4,6 +4,7 @@ use std::collections::HashMap;
 /// Fixed-size types used across the system.
 pub type Namespace = [u8; 32];
 pub type Key32 = [u8; 32];
+pub type Value32 = [u8; 32];
 
 /// Incoming data unit from upstream connectors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,8 +13,8 @@ pub struct IncomingRecord {
     pub namespace: Namespace,
     /// Logical key within namespace.
     pub key: Key32,
-    /// Arbitrary value, opaque to the accumulator core.
-    pub value: Vec<u8>,
+    /// 32-byte hash of the value (more practical than unbounded byte array).
+    pub value: Value32,
     /// UTC unix timestamp in seconds.
     pub timestamp: u64,
 }

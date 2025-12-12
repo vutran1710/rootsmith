@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use crossbeam_channel::Sender;
+use kanal::Sender;
 use crate::types::IncomingRecord;
 
 /// Trait for upstream data sources (websocket, Kafka, SQS, MQTT, etc.).
@@ -25,8 +25,8 @@ pub trait UpstreamConnector: Send + Sync {
 }
 
 /// Single leaf that gets fed into the accumulator.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct Leaf {
     pub key: crate::types::Key32,
-    pub value: Vec<u8>,
+    pub value: crate::types::Value32,
 }

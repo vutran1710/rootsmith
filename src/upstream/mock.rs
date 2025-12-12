@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use crossbeam_channel::Sender;
+use kanal::Sender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
 
@@ -40,7 +40,8 @@ impl UpstreamConnector for MockUpstream {
                 if delay > 0 {
                     tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
                 }
-                if tx.send(record).is_err() {
+                // kanal send is async
+                if tx.send_async(record).await.is_err() {
                     break;
                 }
             }

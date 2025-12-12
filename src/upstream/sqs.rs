@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use crossbeam_channel::Sender;
+use kanal::Sender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
 
