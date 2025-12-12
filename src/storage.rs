@@ -7,6 +7,7 @@ use crate::types::{IncomingRecord, Namespace, Key32};
 const NS_LEN: usize = 32;
 const TS_LEN: usize = 8;
 const KEY_LEN: usize = 32;
+const VALUE_LEN: usize = 32;
 const DB_KEY_LEN: usize = NS_LEN + TS_LEN + KEY_LEN;
 
 /// Filter for scan.
@@ -130,7 +131,12 @@ impl Storage {
                 out.push(IncomingRecord {
                     namespace: ns_dec,
                     key,
-                    value: value.to_vec(),
+                    value: {
+                        let mut val = [0u8; VALUE_LEN];
+                        let len = value.len().min(VALUE_LEN);
+                        val[..len].copy_from_slice(&value[..len]);
+                        val
+                    },
                     timestamp: ts,
                 });
             }

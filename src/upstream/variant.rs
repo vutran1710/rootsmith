@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use crossbeam_channel::Sender;
+use kanal::AsyncSender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
 use crate::config::UpstreamType;
@@ -50,7 +50,7 @@ impl UpstreamConnector for UpstreamVariant {
         }
     }
 
-    async fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, tx: AsyncSender<IncomingRecord>) -> Result<()> {
         match self {
             UpstreamVariant::WebSocket(inner) => inner.open(tx).await,
             UpstreamVariant::Kafka(inner) => inner.open(tx).await,

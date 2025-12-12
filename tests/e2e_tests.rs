@@ -58,7 +58,7 @@ async fn test_e2e_app_run() -> Result<()> {
         test_records.push(IncomingRecord {
             namespace: namespace1,
             key: test_key(i),
-            value: vec![i, i + 1, i + 2],
+            value: test_key(i + 10), // Use 32-byte hash as value
             timestamp: base_timestamp,
         });
     }
@@ -159,7 +159,7 @@ async fn test_accumulator_type_configuration() -> Result<()> {
         let test_records = vec![IncomingRecord {
             namespace: namespace1,
             key: test_key(1),
-            value: vec![1, 2, 3],
+            value: test_key(100), // Use 32-byte hash as value
             timestamp: base_timestamp,
         }];
 

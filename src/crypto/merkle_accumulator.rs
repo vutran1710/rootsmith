@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::types::Key32;
+use crate::types::{Key32, Value32};
 use crate::traits::Accumulator;
 use super::merkle::MerkleTree;
 
@@ -27,7 +27,7 @@ impl Accumulator for MerkleAccumulator {
         "merkle"
     }
 
-    fn put(&mut self, key: Key32, value: Vec<u8>) -> Result<()> {
+    fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
         let mut data = key.to_vec();
         data.extend_from_slice(&value);
         self.tree.add_leaf(data);

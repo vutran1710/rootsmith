@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::types::Key32;
+use crate::types::{Key32, Value32};
 use crate::traits::Accumulator;
 use super::sparse_merkle::SparseMerkleTree;
 
@@ -27,8 +27,8 @@ impl Accumulator for SparseMerkleAccumulator {
         "sparse-merkle"
     }
 
-    fn put(&mut self, key: Key32, value: Vec<u8>) -> Result<()> {
-        self.tree.update(key.to_vec(), value)
+    fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
+        self.tree.update(key.to_vec(), value.to_vec())
     }
 
     fn build_root(&self) -> Result<Vec<u8>> {

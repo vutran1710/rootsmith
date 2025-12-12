@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::types::Key32;
+use crate::types::{Key32, Value32};
 use crate::traits::Accumulator;
 
 /// Simple XOR-based accumulator for demonstration.
@@ -26,13 +26,12 @@ impl Accumulator for SimpleAccumulator {
         "simple-accumulator"
     }
     
-    fn put(&mut self, key: Key32, value: Vec<u8>) -> Result<()> {
-        // Simple XOR-based accumulation
+    fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
         for (i, &byte) in key.iter().enumerate() {
             self.root[i] ^= byte;
         }
         for (i, &byte) in value.iter().enumerate() {
-            self.root[i % 32] ^= byte;
+            self.root[i] ^= byte;
         }
         Ok(())
     }

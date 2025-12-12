@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::types::Key32;
+use crate::types::{Key32, Value32};
 use super::Leaf;
 
 /// Stateful cryptographic accumulator.
@@ -11,12 +11,12 @@ pub trait Accumulator: Send + Sync {
     fn id(&self) -> &'static str;
 
     /// Insert a single leaf into the current accumulator state.
-    fn put(&mut self, key: Key32, value: Vec<u8>) -> Result<()>;
+    fn put(&mut self, key: Key32, value: Value32) -> Result<()>;
 
     /// Insert multiple leaves into the current accumulator state.
     fn put_many(&mut self, items: &[Leaf]) -> Result<()> {
         for leaf in items {
-            self.put(leaf.key, leaf.value.clone())?;
+            self.put(leaf.key, leaf.value)?;
         }
         Ok(())
     }

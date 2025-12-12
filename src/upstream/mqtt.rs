@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use crossbeam_channel::Sender;
+use kanal::AsyncSender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
 
@@ -24,7 +24,7 @@ impl UpstreamConnector for MqttSource {
         "mqtt"
     }
 
-    async fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, _tx: AsyncSender<IncomingRecord>) -> Result<()> {
         tracing::info!("Opening MQTT connection: {} topic: {}", self.broker, self.topic);
         // TODO: Implement actual MQTT connection
         Ok(())

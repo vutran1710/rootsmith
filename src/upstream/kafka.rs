@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use crossbeam_channel::Sender;
+use kanal::AsyncSender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
 
@@ -24,7 +24,7 @@ impl UpstreamConnector for KafkaSource {
         "kafka"
     }
 
-    async fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, _tx: AsyncSender<IncomingRecord>) -> Result<()> {
         tracing::info!("Opening Kafka connection: {} topic: {}", self.brokers, self.topic);
         // TODO: Implement actual Kafka connection
         Ok(())
