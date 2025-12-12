@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crate::types::StoredProof;
 use crate::traits::ProofRegistry;
 
@@ -16,19 +17,20 @@ impl MockProofRegistry {
     }
 }
 
+#[async_trait]
 impl ProofRegistry for MockProofRegistry {
     fn name(&self) -> &'static str {
         "mock-proof-registry"
     }
 
-    fn save_proof(&self, proof: &StoredProof) -> Result<()> {
+    async fn save_proof(&self, proof: &StoredProof) -> Result<()> {
         self.proofs.lock().unwrap().push(proof.clone());
         Ok(())
     }
 
-    fn save_proofs(&self, proofs: &[StoredProof]) -> Result<()> {
+    async fn save_proofs(&self, proofs: &[StoredProof]) -> Result<()> {
         for proof in proofs {
-            self.save_proof(proof)?;
+            self.save_proof(proof).await?;
         }
         Ok(())
     }

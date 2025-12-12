@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossbeam_channel::Sender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
@@ -13,18 +14,19 @@ impl WebSocketSource {
     }
 }
 
+#[async_trait]
 impl UpstreamConnector for WebSocketSource {
     fn name(&self) -> &'static str {
         "websocket"
     }
 
-    fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
         tracing::info!("Opening WebSocket connection: {}", self.url);
         // TODO: Implement actual WebSocket connection
         Ok(())
     }
 
-    fn close(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         tracing::info!("Closing WebSocket connection");
         // TODO: Implement actual WebSocket disconnection
         Ok(())

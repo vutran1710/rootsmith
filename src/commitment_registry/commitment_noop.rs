@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use crate::traits::CommitmentRegistry;
 
@@ -16,12 +17,13 @@ impl Default for CommitmentNoop {
     }
 }
 
+#[async_trait]
 impl CommitmentRegistry for CommitmentNoop {
     fn name(&self) -> &'static str {
         "noop"
     }
 
-    fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
+    async fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
         tracing::info!(
             "Noop commitment registration: namespace={:?}, root={:?}, committed_at={}",
             meta.commitment.namespace,
@@ -31,7 +33,7 @@ impl CommitmentRegistry for CommitmentNoop {
         Ok(())
     }
 
-    fn get_prev_commitment(
+    async fn get_prev_commitment(
         &self,
         _filter: &CommitmentFilterOptions,
     ) -> Result<Option<Commitment>> {

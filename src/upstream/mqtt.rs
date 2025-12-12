@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossbeam_channel::Sender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
@@ -17,18 +18,19 @@ impl MqttSource {
     }
 }
 
+#[async_trait]
 impl UpstreamConnector for MqttSource {
     fn name(&self) -> &'static str {
         "mqtt"
     }
 
-    fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
         tracing::info!("Opening MQTT connection: {} topic: {}", self.broker, self.topic);
         // TODO: Implement actual MQTT connection
         Ok(())
     }
 
-    fn close(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         tracing::info!("Closing MQTT connection");
         // TODO: Implement actual MQTT disconnection
         Ok(())

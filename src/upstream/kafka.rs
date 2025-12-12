@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossbeam_channel::Sender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
@@ -17,18 +18,19 @@ impl KafkaSource {
     }
 }
 
+#[async_trait]
 impl UpstreamConnector for KafkaSource {
     fn name(&self) -> &'static str {
         "kafka"
     }
 
-    fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
         tracing::info!("Opening Kafka connection: {} topic: {}", self.brokers, self.topic);
         // TODO: Implement actual Kafka connection
         Ok(())
     }
 
-    fn close(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         tracing::info!("Closing Kafka connection");
         // TODO: Implement actual Kafka disconnection
         Ok(())

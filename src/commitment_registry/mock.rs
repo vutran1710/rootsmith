@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use crate::traits::CommitmentRegistry;
 
@@ -20,12 +21,13 @@ impl MockCommitmentRegistry {
     }
 }
 
+#[async_trait]
 impl CommitmentRegistry for MockCommitmentRegistry {
     fn name(&self) -> &'static str {
         "mock-commitment-registry"
     }
 
-    fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
+    async fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
         self.commitments.lock().unwrap().push(meta.clone());
         println!(
             "MockCommitmentRegistry: committed {} leaves for namespace {:?}",
@@ -35,7 +37,7 @@ impl CommitmentRegistry for MockCommitmentRegistry {
         Ok(())
     }
 
-    fn get_prev_commitment(
+    async fn get_prev_commitment(
         &self,
         filter: &CommitmentFilterOptions,
     ) -> Result<Option<Commitment>> {

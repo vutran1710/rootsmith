@@ -17,7 +17,8 @@ mod traits;
 use config::BaseConfig;
 use rootsmith::RootSmith;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     // Initialize telemetry
     telemetry::init();
     info!("Starting rootsmith");
@@ -29,7 +30,7 @@ fn main() -> Result<()> {
     
     // Initialize and run the app
     let app = RootSmith::initialize(config)?;
-    app.run()?;
+    app.run().await?;
     
     info!("Rootsmith shutdown complete");
     Ok(())
