@@ -27,7 +27,6 @@ impl Accumulator for SimpleAccumulator {
     }
     
     fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
-        // Simple XOR-based accumulation
         for (i, &byte) in key.iter().enumerate() {
             self.root[i] ^= byte;
         }

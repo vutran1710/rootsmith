@@ -82,22 +82,16 @@ impl RootSmith {
         }
     }
 
-    /// Initialize RootSmith with default/noop components for demonstration.
-    /// In production, this would be replaced with feature-gated concrete implementations.
     pub fn initialize(config: BaseConfig) -> Result<Self> {
         use crate::upstream::NoopUpstream;
         use crate::commitment_registry::CommitmentRegistryVariant;
         use crate::commitment_registry::commitment_noop::CommitmentNoop;
         use crate::proof_registry::{ProofRegistryVariant, NoopProofRegistry};
 
-        // Initialize storage
         let storage = Storage::open(&config.storage_path)?;
         info!("Storage opened at: {}", config.storage_path);
         
-        // Create upstream connector
         let upstream = UpstreamVariant::Noop(NoopUpstream);
-        
-        // Create registries
         let commitment_registry = CommitmentRegistryVariant::Noop(CommitmentNoop::new());
         let proof_registry = ProofRegistryVariant::Noop(NoopProofRegistry);
         
@@ -110,22 +104,16 @@ impl RootSmith {
         ))
     }
 
-    /// Main run loop with parallel tasks:
-    /// - Task 1: Upstream receiving data, forwarding to data channel
-    /// - Task 2: Clock & commit with proper synchronization
-    #[tracing::instrument(skip(self), name = "app_run")]
     pub async fn run(self) -> Result<()> {
         let span = span!(Level::INFO, "app_run");
         let _enter = span.enter();
         
         info!("Starting RootSmith with batch_interval_secs={}", self.config.batch_interval_secs);
         
-        // Create unbounded async channel for data flow
         let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
         
         info!("Starting upstream connector: {}", self.upstream.name());
         
-        // Task 1: Upstream data ingestion
         let upstream_handle = {
             let async_tx = data_tx.clone();
             let mut upstream = self.upstream;
@@ -143,7 +131,6 @@ impl RootSmith {
             })
         };
         
-        // Task 2: Data processing and commit cycle
         let process_handle = {
             let storage = Arc::clone(&self.storage);
             let epoch_start_ts = Arc::clone(&self.epoch_start_ts);
@@ -170,11 +157,9 @@ impl RootSmith {
             })
         };
         
-        // Wait for both tasks to complete
         let upstream_result = upstream_handle.await
             .map_err(|_| anyhow::anyhow!("Upstream task panicked"))?;
         
-        // Drop the sender to signal data processing to finish
         drop(data_tx);
         
         let process_result = process_handle.await
@@ -187,10 +172,6 @@ impl RootSmith {
         Ok(())
     }
 
-    /// Combined data processing and commit loop.
-    /// This runs in a separate thread and handles both incoming data and periodic commits.
-    /// DB writes are NOT blocked during commit - data is tracked in memory for later pruning.
-    #[tracing::instrument(skip_all, name = "process_and_commit_loop")]
     async fn process_and_commit_loop(
         data_rx: AsyncReceiver<IncomingRecord>,
         storage: Arc<Mutex<Storage>>,
@@ -202,7 +183,6 @@ impl RootSmith {
         config: BaseConfig,
     ) -> Result<()> {
         loop {
-            // Check if it's time to commit
             let should_commit = {
                 let epoch_start = *epoch_start_ts.lock().unwrap();
                 let now = Self::now_secs();
@@ -213,7 +193,6 @@ impl RootSmith {
             if should_commit {
                 info!("Commit phase starting - DB writes continue freely");
                 
-                // Perform commit WITHOUT blocking DB writes
                 Self::perform_commit_nonblocking(
                     &storage,
                     &epoch_start_ts,
@@ -226,11 +205,9 @@ impl RootSmith {
                 
                 info!("Commit phase completed - entering pending phase");
                 
-                // Prune committed data during pending phase
                 Self::prune_committed_data(&storage, &committed_records)?;
             }
             
-            // Process incoming data with timeout to allow periodic commit checks
             match tokio::time::timeout(
                 Duration::from_millis(100),
                 data_rx.recv()
@@ -240,21 +217,17 @@ impl RootSmith {
                         namespace = ?record.namespace);
                     let _enter = span.enter();
                     
-                    // Write to storage without blocking
                     let storage_guard = storage.lock().unwrap();
                     
-                    // Track active namespace
                     {
                         let mut namespaces = active_namespaces.lock().unwrap();
                         namespaces.insert(record.namespace, true);
                     }
                     
-                    // Write to storage
                     storage_guard.put(&record)?;
                     debug!("Record stored for namespace {:?}", record.namespace);
                 }
                 Ok(Err(_)) => {
-                    // Channel closed - perform final commit if needed
                     info!("Data channel closed, performing final commit if needed");
                     
                     let should_final_commit = {
@@ -273,14 +246,12 @@ impl RootSmith {
                             &config,
                         ).await?;
                         
-                        // Final prune
                         Self::prune_committed_data(&storage, &committed_records)?;
                     }
                     
                     break;
                 }
                 Err(_) => {
-                    // Timeout - continue to check for commit
                     continue;
                 }
             }
@@ -290,9 +261,6 @@ impl RootSmith {
         Ok(())
     }
 
-    /// Perform commit without blocking DB writes.
-    /// Records are tracked in memory for later pruning in the pending phase.
-    #[tracing::instrument(skip_all, name = "commit")]
     async fn perform_commit_nonblocking(
         storage: &Arc<Mutex<Storage>>,
         epoch_start_ts: &Arc<Mutex<u64>>,
@@ -309,7 +277,6 @@ impl RootSmith {
             epoch_start + config.batch_interval_secs
         };
         
-        // Get list of active namespaces
         let namespaces: Vec<Namespace> = {
             let ns = active_namespaces.lock().unwrap();
             ns.keys().copied().collect()
@@ -317,7 +284,6 @@ impl RootSmith {
         
         info!("Committing {} namespaces", namespaces.len());
         
-        // Commit each namespace and track records
         for namespace in namespaces {
             Self::commit_namespace_nonblocking(
                 storage,
@@ -330,7 +296,6 @@ impl RootSmith {
             ).await?;
         }
         
-        // Reset epoch (commit phase ends when downstream pipelines finish)
         {
             let mut epoch_start = epoch_start_ts.lock().unwrap();
             *epoch_start = Self::now_secs();
@@ -344,9 +309,6 @@ impl RootSmith {
         Ok(())
     }
     
-    /// Prune committed data during pending phase.
-    /// Uses tracked records to delete the right data based on key and value equality.
-    #[tracing::instrument(skip_all, name = "prune")]
     fn prune_committed_data(
         storage: &Arc<Mutex<Storage>>,
         committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
@@ -366,13 +328,11 @@ impl RootSmith {
         
         let storage_guard = storage.lock().unwrap();
         
-        // Group records by namespace for efficient deletion
         let mut by_namespace: HashMap<Namespace, Vec<&CommittedRecord>> = HashMap::new();
         for record in &records_to_prune {
             by_namespace.entry(record.namespace).or_insert_with(Vec::new).push(record);
         }
         
-        // Delete records for each namespace
         for (namespace, records) in by_namespace {
             if let Some(max_ts) = records.iter().map(|r| r.timestamp).max() {
                 let delete_filter = crate::storage::StorageDeleteFilter {
@@ -388,9 +348,6 @@ impl RootSmith {
         Ok(())
     }
 
-    /// Commit a single namespace without blocking storage.
-    /// Records are tracked in memory for later pruning.
-    #[tracing::instrument(skip_all, name = "commit_namespace", fields(namespace = ?namespace))]
     async fn commit_namespace_nonblocking(
         storage: &Arc<Mutex<Storage>>,
         namespace: &Namespace,
@@ -400,11 +357,9 @@ impl RootSmith {
         proof_registry: &ProofRegistryVariant,
         accumulator_type: AccumulatorType,
     ) -> Result<()> {
-        // Scan storage and prepare data (briefly lock for reading)
         let (root, record_count, records_to_track) = {
             let storage_guard = storage.lock().unwrap();
             
-            // Scan storage for this namespace up to committed_at
             let filter = crate::storage::StorageScanFilter {
                 namespace: *namespace,
                 timestamp: Some(committed_at),
@@ -418,10 +373,8 @@ impl RootSmith {
             
             info!("Committing {} records for namespace {:?}", records.len(), namespace);
             
-            // Create accumulator
             let mut accumulator = AccumulatorVariant::new(accumulator_type);
             
-            // Track records for pruning and add to accumulator
             let mut records_to_track = Vec::new();
             for record in &records {
                 accumulator.put(record.key, record.value)?;
@@ -433,15 +386,12 @@ impl RootSmith {
                 });
             }
             
-            // Build root
             let root = accumulator.build_root()?;
             let record_count = records.len();
             
             (root, record_count, records_to_track)
-            // storage_guard is dropped here - DB is now free for writes
         };
         
-        // Create commitment
         let commitment = Commitment {
             namespace: *namespace,
             root: root.clone(),
@@ -453,16 +403,13 @@ impl RootSmith {
             leaf_count: record_count as u64,
         };
         
-        // Save commitment (async operation, downstream pipeline)
         commitment_registry.commit(&meta).await?;
         
-        // Generate and save proofs (placeholder - downstream pipeline)
         let proofs: Vec<StoredProof> = Vec::new();
         if !proofs.is_empty() {
             proof_registry.save_proofs(&proofs).await?;
         }
         
-        // Track records for later pruning (in pending phase)
         {
             let mut committed = committed_records.lock().unwrap();
             committed.extend(records_to_track);
@@ -501,11 +448,9 @@ mod tests {
         assert!(now > 0);
         assert!(now < u64::MAX);
         
-        // Test the RootSmith::now_secs function (it's public and associated with RootSmith)
         let app_now = RootSmith::now_secs();
         assert!(app_now > 0);
         assert!(app_now < u64::MAX);
-        // Should be very close to the previous timestamp
         assert!((app_now as i64 - now as i64).abs() < 2);
     }
 }

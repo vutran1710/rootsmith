@@ -26,7 +26,6 @@ impl Accumulator for MockAccumulator {
     }
 
     fn build_root(&self) -> Result<Vec<u8>> {
-        // Simple hash: XOR all keys and values together
         let mut root = vec![0u8; 32];
         
         for (key, value) in &self.leaves {

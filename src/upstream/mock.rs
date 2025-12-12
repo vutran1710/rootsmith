@@ -40,7 +40,6 @@ impl UpstreamConnector for MockUpstream {
                 if delay > 0 {
                     tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
                 }
-                // kanal async send
                 if tx.send(record).await.is_err() {
                     break;
                 }
