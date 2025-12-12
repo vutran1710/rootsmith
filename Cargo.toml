@@ -17,9 +17,11 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 opentelemetry = { version = "0.24", features = ["trace"] }
 tracing-opentelemetry = "0.27"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"
 
 # optional future deps:
-# tokio, rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
+# rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
 
 [features]
 default = ["backend-merkle", "commitment-reg-contract", "proof-s3"]

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossbeam_channel::Sender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
@@ -17,18 +18,19 @@ impl SqsSource {
     }
 }
 
+#[async_trait]
 impl UpstreamConnector for SqsSource {
     fn name(&self) -> &'static str {
         "sqs"
     }
 
-    fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
         tracing::info!("Opening SQS connection: {} region: {}", self.queue_url, self.region);
         // TODO: Implement actual SQS connection
         Ok(())
     }
 
-    fn close(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         tracing::info!("Closing SQS connection");
         // TODO: Implement actual SQS disconnection
         Ok(())

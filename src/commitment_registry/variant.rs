@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use crate::traits::CommitmentRegistry;
 use crate::config::CommitmentRegistryType;
@@ -26,6 +27,7 @@ impl CommitmentRegistryVariant {
     }
 }
 
+#[async_trait]
 impl CommitmentRegistry for CommitmentRegistryVariant {
     fn name(&self) -> &'static str {
         match self {
@@ -35,22 +37,22 @@ impl CommitmentRegistry for CommitmentRegistryVariant {
         }
     }
 
-    fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
+    async fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
         match self {
-            CommitmentRegistryVariant::Contract(inner) => inner.commit(meta),
-            CommitmentRegistryVariant::Noop(inner) => inner.commit(meta),
-            CommitmentRegistryVariant::Mock(inner) => inner.commit(meta),
+            CommitmentRegistryVariant::Contract(inner) => inner.commit(meta).await,
+            CommitmentRegistryVariant::Noop(inner) => inner.commit(meta).await,
+            CommitmentRegistryVariant::Mock(inner) => inner.commit(meta).await,
         }
     }
 
-    fn get_prev_commitment(
+    async fn get_prev_commitment(
         &self,
         filter: &CommitmentFilterOptions,
     ) -> Result<Option<Commitment>> {
         match self {
-            CommitmentRegistryVariant::Contract(inner) => inner.get_prev_commitment(filter),
-            CommitmentRegistryVariant::Noop(inner) => inner.get_prev_commitment(filter),
-            CommitmentRegistryVariant::Mock(inner) => inner.get_prev_commitment(filter),
+            CommitmentRegistryVariant::Contract(inner) => inner.get_prev_commitment(filter).await,
+            CommitmentRegistryVariant::Noop(inner) => inner.get_prev_commitment(filter).await,
+            CommitmentRegistryVariant::Mock(inner) => inner.get_prev_commitment(filter).await,
         }
     }
 }

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossbeam_channel::Sender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
@@ -36,6 +37,7 @@ impl UpstreamVariant {
     }
 }
 
+#[async_trait]
 impl UpstreamConnector for UpstreamVariant {
     fn name(&self) -> &'static str {
         match self {
@@ -48,25 +50,25 @@ impl UpstreamConnector for UpstreamVariant {
         }
     }
 
-    fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()> {
         match self {
-            UpstreamVariant::WebSocket(inner) => inner.open(tx),
-            UpstreamVariant::Kafka(inner) => inner.open(tx),
-            UpstreamVariant::Sqs(inner) => inner.open(tx),
-            UpstreamVariant::Mqtt(inner) => inner.open(tx),
-            UpstreamVariant::Noop(inner) => inner.open(tx),
-            UpstreamVariant::Mock(inner) => inner.open(tx),
+            UpstreamVariant::WebSocket(inner) => inner.open(tx).await,
+            UpstreamVariant::Kafka(inner) => inner.open(tx).await,
+            UpstreamVariant::Sqs(inner) => inner.open(tx).await,
+            UpstreamVariant::Mqtt(inner) => inner.open(tx).await,
+            UpstreamVariant::Noop(inner) => inner.open(tx).await,
+            UpstreamVariant::Mock(inner) => inner.open(tx).await,
         }
     }
 
-    fn close(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         match self {
-            UpstreamVariant::WebSocket(inner) => inner.close(),
-            UpstreamVariant::Kafka(inner) => inner.close(),
-            UpstreamVariant::Sqs(inner) => inner.close(),
-            UpstreamVariant::Mqtt(inner) => inner.close(),
-            UpstreamVariant::Noop(inner) => inner.close(),
-            UpstreamVariant::Mock(inner) => inner.close(),
+            UpstreamVariant::WebSocket(inner) => inner.close().await,
+            UpstreamVariant::Kafka(inner) => inner.close().await,
+            UpstreamVariant::Sqs(inner) => inner.close().await,
+            UpstreamVariant::Mqtt(inner) => inner.close().await,
+            UpstreamVariant::Noop(inner) => inner.close().await,
+            UpstreamVariant::Mock(inner) => inner.close().await,
         }
     }
 }

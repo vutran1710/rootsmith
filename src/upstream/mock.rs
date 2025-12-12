@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossbeam_channel::Sender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
@@ -24,19 +25,20 @@ impl Default for MockUpstream {
     }
 }
 
+#[async_trait]
 impl UpstreamConnector for MockUpstream {
     fn name(&self) -> &'static str {
         "mock-upstream"
     }
 
-    fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()> {
         let records = self.records.clone();
         let delay = self.delay_ms;
 
-        std::thread::spawn(move || {
+        tokio::spawn(async move {
             for record in records {
                 if delay > 0 {
-                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
                 }
                 if tx.send(record).is_err() {
                     break;
@@ -47,7 +49,7 @@ impl UpstreamConnector for MockUpstream {
         Ok(())
     }
 
-    fn close(&mut self) -> Result<()> {
+    async fn close(&mut self) -> Result<()> {
         Ok(())
     }
 }

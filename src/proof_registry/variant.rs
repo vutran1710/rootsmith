@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crate::types::StoredProof;
 use crate::traits::ProofRegistry;
 use crate::config::ProofRegistryType;
@@ -29,6 +30,7 @@ impl ProofRegistryVariant {
     }
 }
 
+#[async_trait]
 impl ProofRegistry for ProofRegistryVariant {
     fn name(&self) -> &'static str {
         match self {
@@ -39,21 +41,21 @@ impl ProofRegistry for ProofRegistryVariant {
         }
     }
 
-    fn save_proof(&self, proof: &StoredProof) -> Result<()> {
+    async fn save_proof(&self, proof: &StoredProof) -> Result<()> {
         match self {
-            ProofRegistryVariant::S3(inner) => inner.save_proof(proof),
-            ProofRegistryVariant::Github(inner) => inner.save_proof(proof),
-            ProofRegistryVariant::Noop(inner) => inner.save_proof(proof),
-            ProofRegistryVariant::Mock(inner) => inner.save_proof(proof),
+            ProofRegistryVariant::S3(inner) => inner.save_proof(proof).await,
+            ProofRegistryVariant::Github(inner) => inner.save_proof(proof).await,
+            ProofRegistryVariant::Noop(inner) => inner.save_proof(proof).await,
+            ProofRegistryVariant::Mock(inner) => inner.save_proof(proof).await,
         }
     }
 
-    fn save_proofs(&self, proofs: &[StoredProof]) -> Result<()> {
+    async fn save_proofs(&self, proofs: &[StoredProof]) -> Result<()> {
         match self {
-            ProofRegistryVariant::S3(inner) => inner.save_proofs(proofs),
-            ProofRegistryVariant::Github(inner) => inner.save_proofs(proofs),
-            ProofRegistryVariant::Noop(inner) => inner.save_proofs(proofs),
-            ProofRegistryVariant::Mock(inner) => inner.save_proofs(proofs),
+            ProofRegistryVariant::S3(inner) => inner.save_proofs(proofs).await,
+            ProofRegistryVariant::Github(inner) => inner.save_proofs(proofs).await,
+            ProofRegistryVariant::Noop(inner) => inner.save_proofs(proofs).await,
+            ProofRegistryVariant::Mock(inner) => inner.save_proofs(proofs).await,
         }
     }
 }

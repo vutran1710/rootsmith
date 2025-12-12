@@ -1,7 +1,5 @@
 use anyhow::Result;
 use ::rootsmith::*;
-use std::thread;
-use std::time::Duration;
 
 use ::rootsmith::upstream::{UpstreamVariant, MockUpstream};
 use ::rootsmith::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
@@ -32,8 +30,8 @@ fn test_now() -> u64 {
 
 // ===== E2E Tests =====
 
-#[test]
-fn test_e2e_app_run() -> Result<()> {
+#[tokio::test]
+async fn test_e2e_app_run() -> Result<()> {
     println!("\n=== E2E Test: RootSmith.run() with commit cycle ===\n");
 
     // Create temporary storage directory
@@ -83,17 +81,17 @@ fn test_e2e_app_run() -> Result<()> {
         storage,
     );
 
-    println!("RootSmith created, starting run loop in thread...");
+    println!("RootSmith created, starting run loop in async task...");
 
-    // Run app in a separate thread with timeout
-    let app_handle = thread::spawn(move || app.run());
+    // Run app in a separate async task with timeout
+    let app_handle = tokio::spawn(async move { app.run().await });
 
     // Wait for app to process records and commit
-    thread::sleep(Duration::from_secs(2));
+    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-    // Wait for app thread to finish
-    let result = app_handle.join()
-        .map_err(|_| anyhow::anyhow!("RootSmith thread panicked"))?;
+    // Wait for app task to finish
+    let result = app_handle.await
+        .map_err(|_| anyhow::anyhow!("RootSmith task panicked"))?;
     
     result?;
 
@@ -126,8 +124,8 @@ fn test_e2e_app_run() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_accumulator_type_configuration() -> Result<()> {
+#[tokio::test]
+async fn test_accumulator_type_configuration() -> Result<()> {
     println!("\n=== Test: Different accumulator types configuration ===\n");
 
     // Test that each accumulator type can be configured and creates the correct variant
@@ -184,15 +182,15 @@ fn test_accumulator_type_configuration() -> Result<()> {
         // Verify accumulator type is stored in config
         assert_eq!(app.config.accumulator_type, acc_type);
 
-        // Run app in a separate thread
-        let app_handle = thread::spawn(move || app.run());
+        // Run app in a separate async task
+        let app_handle = tokio::spawn(async move { app.run().await });
 
         // Wait for processing
-        thread::sleep(Duration::from_secs(2));
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-        // Wait for app thread to finish
-        let result = app_handle.join()
-            .map_err(|_| anyhow::anyhow!("RootSmith thread panicked"))?;
+        // Wait for app task to finish
+        let result = app_handle.await
+            .map_err(|_| anyhow::anyhow!("RootSmith task panicked"))?;
         
         result?;
 

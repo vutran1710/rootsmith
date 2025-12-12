@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crossbeam_channel::Sender;
 use crate::types::IncomingRecord;
 
@@ -6,6 +7,7 @@ use crate::types::IncomingRecord;
 ///
 /// Implementations are responsible for producing `IncomingRecord`s into
 /// the app's ingestion pipeline.
+#[async_trait]
 pub trait UpstreamConnector: Send + Sync {
     /// Human-readable connector name for logging.
     fn name(&self) -> &'static str;
@@ -16,10 +18,10 @@ pub trait UpstreamConnector: Send + Sync {
     /// - spawn a thread / async task,
     /// - read from external source,
     /// - push `IncomingRecord`s into the provided channel.
-    fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()>;
+    async fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()>;
 
     /// Close/stop the connector and release resources.
-    fn close(&mut self) -> Result<()>;
+    async fn close(&mut self) -> Result<()>;
 }
 
 /// Single leaf that gets fed into the accumulator.

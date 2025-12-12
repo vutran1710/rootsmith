@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crate::types::StoredProof;
 use crate::traits::ProofRegistry;
 
@@ -13,12 +14,13 @@ impl ProofGithub {
     }
 }
 
+#[async_trait]
 impl ProofRegistry for ProofGithub {
     fn name(&self) -> &'static str {
         "github"
     }
 
-    fn save_proof(&self, proof: &StoredProof) -> Result<()> {
+    async fn save_proof(&self, proof: &StoredProof) -> Result<()> {
         let proof_id = format!("proof_{:?}_{}", proof.key, uuid::Uuid::new_v4());
         tracing::info!(
             "Storing proof to GitHub: repo={}, branch={}, id={}",

@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::Result;
 use crossbeam_channel::{unbounded, Receiver};
-use tracing::{info, warn, error, debug, span, Level};
+use tracing::{info, error, debug, span, Level};
 use crate::storage::Storage;
 use crate::types::{BatchCommitmentMeta, Commitment, IncomingRecord, Namespace, StoredProof};
 use crate::config::{BaseConfig, AccumulatorType};
@@ -102,7 +101,7 @@ impl RootSmith {
     /// - Task 1: Upstream receiving data, forwarding to data channel
     /// - Task 2: Clock & commit with proper synchronization
     #[tracing::instrument(skip(self), name = "app_run")]
-    pub fn run(mut self) -> Result<()> {
+    pub async fn run(self) -> Result<()> {
         let span = span!(Level::INFO, "app_run");
         let _enter = span.enter();
         
@@ -116,11 +115,12 @@ impl RootSmith {
         // Task 1: Upstream data ingestion
         let upstream_handle = {
             let data_tx_clone = data_tx.clone();
-            thread::spawn(move || {
+            let mut upstream = self.upstream;
+            tokio::task::spawn(async move {
                 let span = span!(Level::INFO, "upstream_task");
                 let _enter = span.enter();
                 
-                if let Err(e) = self.upstream.open(data_tx_clone) {
+                if let Err(e) = upstream.open(data_tx_clone).await {
                     error!("Upstream connector failed: {}", e);
                     return Err(e);
                 }
@@ -139,7 +139,7 @@ impl RootSmith {
             let proof_registry = self.proof_registry;
             let config = self.config.clone();
             
-            thread::spawn(move || {
+            tokio::task::spawn(async move {
                 let span = span!(Level::INFO, "process_and_commit_task");
                 let _enter = span.enter();
                 
@@ -151,18 +151,18 @@ impl RootSmith {
                     commitment_registry,
                     proof_registry,
                     config,
-                )
+                ).await
             })
         };
         
         // Wait for both tasks to complete
-        let upstream_result = upstream_handle.join()
+        let upstream_result = upstream_handle.await
             .map_err(|_| anyhow::anyhow!("Upstream task panicked"))?;
         
         // Drop the sender to signal data processing to finish
         drop(data_tx);
         
-        let process_result = process_handle.join()
+        let process_result = process_handle.await
             .map_err(|_| anyhow::anyhow!("Process task panicked"))?;
         
         upstream_result?;
@@ -175,7 +175,7 @@ impl RootSmith {
     /// Combined data processing and commit loop.
     /// This runs in a separate thread and handles both incoming data and periodic commits.
     #[tracing::instrument(skip_all, name = "process_and_commit_loop")]
-    fn process_and_commit_loop(
+    async fn process_and_commit_loop(
         data_rx: Receiver<IncomingRecord>,
         storage: Arc<Mutex<Storage>>,
         epoch_start_ts: Arc<Mutex<u64>>,
@@ -204,7 +204,7 @@ impl RootSmith {
                     &commitment_registry,
                     &proof_registry,
                     &config,
-                )?;
+                ).await?;
                 
                 info!("Commit phase completed - resuming data ingestion");
             }
@@ -250,7 +250,7 @@ impl RootSmith {
                             &commitment_registry,
                             &proof_registry,
                             &config,
-                        )?;
+                        ).await?;
                     }
                     
                     break;
@@ -264,7 +264,7 @@ impl RootSmith {
 
     /// Perform commit with locks held (this pauses DB inserts).
     #[tracing::instrument(skip_all, name = "commit")]
-    fn perform_commit_locked(
+    async fn perform_commit_locked(
         storage: &Arc<Mutex<Storage>>,
         epoch_start_ts: &Arc<Mutex<u64>>,
         active_namespaces: &Arc<Mutex<HashMap<Namespace, bool>>>,
@@ -296,7 +296,7 @@ impl RootSmith {
                 commitment_registry,
                 proof_registry,
                 config.accumulator_type,
-            )?;
+            ).await?;
         }
         
         // Reset epoch
@@ -315,7 +315,7 @@ impl RootSmith {
 
     /// Commit a single namespace with storage lock.
     #[tracing::instrument(skip_all, name = "commit_namespace", fields(namespace = ?namespace))]
-    fn commit_namespace_locked(
+    async fn commit_namespace_locked(
         storage: &Arc<Mutex<Storage>>,
         namespace: &Namespace,
         committed_at: u64,
@@ -323,32 +323,39 @@ impl RootSmith {
         proof_registry: &ProofRegistryVariant,
         accumulator_type: AccumulatorType,
     ) -> Result<()> {
-        let storage_guard = storage.lock().unwrap();
-        
-        // Scan storage for this namespace up to committed_at
-        let filter = crate::storage::StorageScanFilter {
-            namespace: *namespace,
-            timestamp: Some(committed_at),
+        // Scan storage and prepare data (release lock before async operations)
+        let (root, record_count) = {
+            let storage_guard = storage.lock().unwrap();
+            
+            // Scan storage for this namespace up to committed_at
+            let filter = crate::storage::StorageScanFilter {
+                namespace: *namespace,
+                timestamp: Some(committed_at),
+            };
+            let records = storage_guard.scan(&filter)?;
+            
+            if records.is_empty() {
+                debug!("No records to commit for namespace {:?}", namespace);
+                return Ok(());
+            }
+            
+            info!("Committing {} records for namespace {:?}", records.len(), namespace);
+            
+            // Create accumulator
+            let mut accumulator = AccumulatorVariant::new(accumulator_type);
+            
+            // Add all records to accumulator
+            for record in &records {
+                accumulator.put(record.key, record.value.clone())?;
+            }
+            
+            // Build root
+            let root = accumulator.build_root()?;
+            let record_count = records.len();
+            
+            (root, record_count)
+            // storage_guard is dropped here
         };
-        let records = storage_guard.scan(&filter)?;
-        
-        if records.is_empty() {
-            debug!("No records to commit for namespace {:?}", namespace);
-            return Ok(());
-        }
-        
-        info!("Committing {} records for namespace {:?}", records.len(), namespace);
-        
-        // Create accumulator
-        let mut accumulator = AccumulatorVariant::new(accumulator_type);
-        
-        // Add all records to accumulator
-        for record in &records {
-            accumulator.put(record.key, record.value.clone())?;
-        }
-        
-        // Build root
-        let root = accumulator.build_root()?;
         
         // Create commitment
         let commitment = Commitment {
@@ -359,29 +366,32 @@ impl RootSmith {
         
         let meta = BatchCommitmentMeta {
             commitment,
-            leaf_count: records.len() as u64,
+            leaf_count: record_count as u64,
         };
         
-        // Save commitment
-        commitment_registry.commit(&meta)?;
+        // Save commitment (async operation)
+        commitment_registry.commit(&meta).await?;
         
         // Generate and save proofs (placeholder - would generate real proofs here)
         let proofs: Vec<StoredProof> = Vec::new();
         if !proofs.is_empty() {
-            proof_registry.save_proofs(&proofs)?;
+            proof_registry.save_proofs(&proofs).await?;
         }
         
-        // Remove committed data from storage
-        let delete_filter = crate::storage::StorageDeleteFilter {
-            namespace: *namespace,
-            timestamp: committed_at,
-        };
-        storage_guard.delete(&delete_filter)?;
+        // Remove committed data from storage (re-acquire lock)
+        {
+            let storage_guard = storage.lock().unwrap();
+            let delete_filter = crate::storage::StorageDeleteFilter {
+                namespace: *namespace,
+                timestamp: committed_at,
+            };
+            storage_guard.delete(&delete_filter)?;
+        }
         
         info!(
             "Committed namespace {:?}: {} records, root len={}",
             namespace,
-            records.len(),
+            record_count,
             root.len()
         );
         

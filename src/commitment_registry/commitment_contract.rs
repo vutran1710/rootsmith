@@ -1,4 +1,5 @@
 use anyhow::Result;
+use async_trait::async_trait;
 use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use crate::traits::CommitmentRegistry;
 
@@ -16,12 +17,13 @@ impl CommitmentContract {
     }
 }
 
+#[async_trait]
 impl CommitmentRegistry for CommitmentContract {
     fn name(&self) -> &'static str {
         "contract"
     }
 
-    fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
+    async fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
         tracing::info!(
             "Registering commitment to contract {}: namespace={:?}, root={:?}, committed_at={}",
             self.contract_address,
@@ -33,7 +35,7 @@ impl CommitmentRegistry for CommitmentContract {
         Ok(())
     }
 
-    fn get_prev_commitment(
+    async fn get_prev_commitment(
         &self,
         filter: &CommitmentFilterOptions,
     ) -> Result<Option<Commitment>> {
