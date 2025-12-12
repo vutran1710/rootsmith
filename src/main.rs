@@ -10,6 +10,7 @@ mod crypto;
 mod upstream;
 mod downstream;
 mod app;
+mod traits;
 
 fn main() -> Result<()> {
     telemetry::init();

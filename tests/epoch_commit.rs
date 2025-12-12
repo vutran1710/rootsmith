@@ -1,4 +1,4 @@
-use rootsmith::types::{Commitment, Proof};
+use rootsmith::types::LegacyCommitment;
 use rootsmith::crypto::MerkleTree;
 
 #[test]
@@ -9,7 +9,7 @@ fn test_epoch_commit() {
     merkle.add_leaf(vec![7, 8, 9]);
     let root = merkle.root().expect("Failed to get merkle root");
     let root_hex = hex::encode(&root);
-    let commitment = Commitment {
+    let commitment = LegacyCommitment {
         epoch: 1,
         merkle_root: root_hex,
         timestamp: 1000,

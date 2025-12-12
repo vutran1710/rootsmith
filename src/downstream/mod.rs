@@ -4,11 +4,11 @@ pub mod proof_s3;
 pub mod proof_github;
 
 use anyhow::Result;
-use crate::types::{Commitment, Proof};
+use crate::types::{LegacyCommitment, Proof};
 
 pub trait CommitmentRegistry {
-    fn register(&mut self, commitment: &Commitment) -> Result<()>;
-    fn verify(&self, commitment: &Commitment) -> Result<bool>;
+    fn register(&mut self, commitment: &LegacyCommitment) -> Result<()>;
+    fn verify(&self, commitment: &LegacyCommitment) -> Result<bool>;
 }
 
 pub trait ProofRegistry {

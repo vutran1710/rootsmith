@@ -1,5 +1,5 @@
 use anyhow::Result;
-use crate::types::Commitment;
+use crate::types::LegacyCommitment;
 use super::CommitmentRegistry;
 
 pub struct CommitmentNoop;
@@ -17,7 +17,7 @@ impl Default for CommitmentNoop {
 }
 
 impl CommitmentRegistry for CommitmentNoop {
-    fn register(&mut self, commitment: &Commitment) -> Result<()> {
+    fn register(&mut self, commitment: &LegacyCommitment) -> Result<()> {
         tracing::info!(
             "Noop commitment registration: epoch={}, root={}",
             commitment.epoch,
@@ -26,7 +26,7 @@ impl CommitmentRegistry for CommitmentNoop {
         Ok(())
     }
 
-    fn verify(&self, _commitment: &Commitment) -> Result<bool> {
+    fn verify(&self, _commitment: &LegacyCommitment) -> Result<bool> {
         Ok(true)
     }
 }

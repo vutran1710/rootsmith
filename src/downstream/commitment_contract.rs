@@ -1,10 +1,10 @@
 use anyhow::Result;
-use crate::types::Commitment;
+use crate::types::LegacyCommitment;
 use super::CommitmentRegistry;
 
 pub struct CommitmentContract {
     contract_address: String,
-    registered: Vec<Commitment>,
+    registered: Vec<LegacyCommitment>,
 }
 
 impl CommitmentContract {
@@ -17,7 +17,7 @@ impl CommitmentContract {
 }
 
 impl CommitmentRegistry for CommitmentContract {
-    fn register(&mut self, commitment: &Commitment) -> Result<()> {
+    fn register(&mut self, commitment: &LegacyCommitment) -> Result<()> {
         tracing::info!(
             "Registering commitment to contract {}: epoch={}, root={}",
             self.contract_address,
@@ -28,7 +28,7 @@ impl CommitmentRegistry for CommitmentContract {
         Ok(())
     }
 
-    fn verify(&self, commitment: &Commitment) -> Result<bool> {
+    fn verify(&self, commitment: &LegacyCommitment) -> Result<bool> {
         let found = self.registered.iter().any(|c| {
             c.epoch == commitment.epoch && c.merkle_root == commitment.merkle_root
         });
