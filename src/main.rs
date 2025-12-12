@@ -9,12 +9,13 @@ mod types;
 mod storage;
 mod crypto;
 mod upstream;
-mod downstream;
+mod commitment_registry;
+mod proof_registry;
 mod app;
 mod traits;
 
 use config::BaseConfig;
-use app::DefaultApp;
+use app::App;
 
 fn main() -> Result<()> {
     // Initialize telemetry
@@ -27,7 +28,7 @@ fn main() -> Result<()> {
           config.storage_path, config.batch_interval_secs);
     
     // Initialize and run the app
-    let app = DefaultApp::initialize(config)?;
+    let app = App::initialize(config)?;
     app.run()?;
     
     info!("Rootsmith shutdown complete");

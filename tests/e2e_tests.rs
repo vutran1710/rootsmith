@@ -1,188 +1,13 @@
 use anyhow::Result;
-use crossbeam_channel::Sender;
 use rootsmith::*;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-// ===== Mock Implementations =====
-
-/// Mock upstream connector that generates test data.
-struct MockUpstreamConnector {
-    records: Vec<IncomingRecord>,
-    delay_ms: u64,
-}
-
-impl MockUpstreamConnector {
-    fn new(records: Vec<IncomingRecord>, delay_ms: u64) -> Self {
-        Self { records, delay_ms }
-    }
-}
-
-impl UpstreamConnector for MockUpstreamConnector {
-    fn name(&self) -> &'static str {
-        "mock-upstream"
-    }
-
-    fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()> {
-        let records = self.records.clone();
-        let delay = self.delay_ms;
-
-        thread::spawn(move || {
-            for record in records {
-                if delay > 0 {
-                    thread::sleep(Duration::from_millis(delay));
-                }
-                if tx.send(record).is_err() {
-                    break;
-                }
-            }
-        });
-
-        Ok(())
-    }
-
-    fn close(&mut self) -> Result<()> {
-        Ok(())
-    }
-}
-
-/// Mock commitment registry that stores commitments in memory.
-#[derive(Clone)]
-struct MockCommitmentRegistry {
-    commitments: Arc<Mutex<Vec<BatchCommitmentMeta>>>,
-}
-
-impl MockCommitmentRegistry {
-    fn new() -> Self {
-        Self {
-            commitments: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-
-    fn get_commitments(&self) -> Vec<BatchCommitmentMeta> {
-        self.commitments.lock().unwrap().clone()
-    }
-}
-
-impl CommitmentRegistry for MockCommitmentRegistry {
-    fn name(&self) -> &'static str {
-        "mock-commitment-registry"
-    }
-
-    fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
-        self.commitments.lock().unwrap().push(meta.clone());
-        println!(
-            "MockCommitmentRegistry: committed {} leaves for namespace {:?}",
-            meta.leaf_count,
-            meta.commitment.namespace
-        );
-        Ok(())
-    }
-
-    fn get_prev_commitment(
-        &self,
-        filter: &CommitmentFilterOptions,
-    ) -> Result<Option<Commitment>> {
-        let commitments = self.commitments.lock().unwrap();
-        
-        let result = commitments
-            .iter()
-            .filter(|m| {
-                m.commitment.namespace == filter.namespace
-                    && m.commitment.committed_at <= filter.time
-            })
-            .max_by_key(|m| m.commitment.committed_at)
-            .map(|m| m.commitment.clone());
-
-        Ok(result)
-    }
-}
-
-/// Mock proof registry that stores proofs in memory.
-#[derive(Clone)]
-struct MockProofRegistry {
-    proofs: Arc<Mutex<Vec<StoredProof>>>,
-}
-
-impl MockProofRegistry {
-    fn new() -> Self {
-        Self {
-            proofs: Arc::new(Mutex::new(Vec::new())),
-        }
-    }
-}
-
-impl ProofRegistry for MockProofRegistry {
-    fn name(&self) -> &'static str {
-        "mock-proof-registry"
-    }
-
-    fn save_proof(&self, proof: &StoredProof) -> Result<()> {
-        self.proofs.lock().unwrap().push(proof.clone());
-        Ok(())
-    }
-
-    fn save_proofs(&self, proofs: &[StoredProof]) -> Result<()> {
-        for proof in proofs {
-            self.save_proof(proof)?;
-        }
-        Ok(())
-    }
-}
-
-/// Simple mock accumulator for testing.
-struct MockAccumulator {
-    leaves: std::collections::HashMap<Key32, Vec<u8>>,
-}
-
-impl MockAccumulator {
-    fn new() -> Self {
-        Self {
-            leaves: std::collections::HashMap::new(),
-        }
-    }
-}
-
-impl Accumulator for MockAccumulator {
-    fn id(&self) -> &'static str {
-        "mock-accumulator"
-    }
-
-    fn put(&mut self, key: Key32, value: Vec<u8>) -> Result<()> {
-        self.leaves.insert(key, value);
-        Ok(())
-    }
-
-    fn build_root(&self) -> Result<Vec<u8>> {
-        // Simple hash: XOR all keys and values together
-        let mut root = vec![0u8; 32];
-        
-        for (key, value) in &self.leaves {
-            for (i, &byte) in key.iter().enumerate() {
-                root[i] ^= byte;
-            }
-            for (i, &byte) in value.iter().enumerate() {
-                root[i % 32] ^= byte;
-            }
-        }
-
-        Ok(root)
-    }
-
-    fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {
-        Ok(self.leaves.get(key).map(|v| v == value).unwrap_or(false))
-    }
-
-    fn verify_non_inclusion(&self, key: &Key32) -> Result<bool> {
-        Ok(!self.leaves.contains_key(key))
-    }
-
-    fn flush(&mut self) -> Result<()> {
-        self.leaves.clear();
-        Ok(())
-    }
-}
+use rootsmith::upstream::{UpstreamVariant, MockUpstream};
+use rootsmith::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
+use rootsmith::proof_registry::{ProofRegistryVariant, MockProofRegistry};
+use rootsmith::crypto::{AccumulatorVariant, MockAccumulator};
 
 // ===== Test Helper Functions =====
 
@@ -242,20 +67,21 @@ fn test_e2e_app_run() -> Result<()> {
 
     println!("Created {} test records", test_records.len());
 
-    // Create mock components
-    let upstream = MockUpstreamConnector::new(test_records.clone(), 50);
+    // Create mock components using the enum variants
+    let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
     let commitment_registry = MockCommitmentRegistry::new();
-    let proof_registry = MockProofRegistry::new();
     let commitment_registry_clone = commitment_registry.clone();
+    let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
+    let proof_registry = ProofRegistryVariant::Mock(MockProofRegistry::new());
 
     // Create accumulator factory
-    let accumulator_factory: Arc<dyn Fn() -> Box<dyn Accumulator> + Send + Sync> =
-        Arc::new(|| Box::new(MockAccumulator::new()));
+    let accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync> =
+        Arc::new(|| AccumulatorVariant::Mock(MockAccumulator::new()));
 
     // Create App
     let app = App::new(
         upstream,
-        commitment_registry,
+        commitment_registry_variant,
         proof_registry,
         config,
         accumulator_factory,
@@ -288,14 +114,17 @@ fn test_e2e_app_run() -> Result<()> {
         commitments.len()
     );
 
-    // Verify namespace1 commitment
-    let ns1_commitment = commitments
+    // Verify namespace1 commitment - get the last one as there may be multiple commits
+    let ns1_commitments: Vec<_> = commitments
         .iter()
-        .find(|c| c.commitment.namespace == namespace1);
-    assert!(ns1_commitment.is_some(), "Missing commitment for namespace1");
-    let ns1_commitment = ns1_commitment.unwrap();
-    assert_eq!(ns1_commitment.leaf_count, 3);
-    println!("✓ Namespace1: {} leaves committed", ns1_commitment.leaf_count);
+        .filter(|c| c.commitment.namespace == namespace1)
+        .collect();
+    assert!(!ns1_commitments.is_empty(), "Missing commitment for namespace1");
+    
+    // Sum up all leaves committed for this namespace
+    let total_leaves: u64 = ns1_commitments.iter().map(|c| c.leaf_count).sum();
+    assert_eq!(total_leaves, 3, "Expected 3 total leaves committed");
+    println!("✓ Namespace1: {} leaves committed across {} commit(s)", total_leaves, ns1_commitments.len());
 
     println!("\n=== E2E Test Passed! ===\n");
 
