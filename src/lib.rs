@@ -14,7 +14,7 @@ pub mod upstream;
 
 // Re-export commonly used types and traits
 pub use app::App;
-pub use config::BaseConfig;
+pub use config::{BaseConfig, AccumulatorType};
 pub use storage::Storage;
 pub use traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector};
 pub use types::{

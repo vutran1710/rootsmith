@@ -8,7 +8,7 @@ use crossbeam_channel::{unbounded, Receiver};
 use tracing::{info, warn, error, debug, span, Level};
 use crate::storage::Storage;
 use crate::types::{BatchCommitmentMeta, Commitment, IncomingRecord, Namespace, StoredProof};
-use crate::config::BaseConfig;
+use crate::config::{BaseConfig, AccumulatorType};
 use crate::traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector};
 use crate::upstream::UpstreamVariant;
 use crate::commitment_registry::CommitmentRegistryVariant;
@@ -38,9 +38,6 @@ pub struct App {
     /// Global/base configuration.
     pub config: BaseConfig,
 
-    /// Factory to create new accumulator instances per namespace.
-    pub accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
-
     /// Persistent storage (RocksDB).
     pub storage: Arc<Mutex<Storage>>,
 
@@ -52,13 +49,26 @@ pub struct App {
 }
 
 impl App {
+    /// Create a new accumulator instance based on the configured type.
+    fn create_accumulator(accumulator_type: AccumulatorType) -> AccumulatorVariant {
+        use crate::crypto::{SimpleAccumulator, MockAccumulator};
+        use crate::crypto::merkle_accumulator::MerkleAccumulator;
+        use crate::crypto::sparse_merkle_accumulator::SparseMerkleAccumulator;
+        
+        match accumulator_type {
+            AccumulatorType::Simple => AccumulatorVariant::Simple(SimpleAccumulator::new()),
+            AccumulatorType::Merkle => AccumulatorVariant::Merkle(MerkleAccumulator::new()),
+            AccumulatorType::SparseMerkle => AccumulatorVariant::SparseMerkle(SparseMerkleAccumulator::new()),
+            AccumulatorType::Mock => AccumulatorVariant::Mock(MockAccumulator::new()),
+        }
+    }
+
     /// Create a new App.
     pub fn new(
         upstream: UpstreamVariant,
         commitment_registry: CommitmentRegistryVariant,
         proof_registry: ProofRegistryVariant,
         config: BaseConfig,
-        accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
         storage: Storage,
     ) -> Self {
         let now = Self::now_secs();
@@ -68,7 +78,6 @@ impl App {
             commitment_registry,
             proof_registry,
             config,
-            accumulator_factory,
             storage: Arc::new(Mutex::new(storage)),
             epoch_start_ts: Arc::new(Mutex::new(now)),
             active_namespaces: Arc::new(Mutex::new(HashMap::new())),
@@ -82,17 +91,10 @@ impl App {
         use crate::commitment_registry::CommitmentRegistryVariant;
         use crate::commitment_registry::commitment_noop::CommitmentNoop;
         use crate::proof_registry::{ProofRegistryVariant, NoopProofRegistry};
-        use crate::crypto::SimpleAccumulator;
 
         // Initialize storage
         let storage = Storage::open(&config.storage_path)?;
         info!("Storage opened at: {}", config.storage_path);
-        
-        // Create accumulator factory
-        let accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync> =
-            Arc::new(|| {
-                AccumulatorVariant::Simple(SimpleAccumulator::new())
-            });
         
         // Create upstream connector
         let upstream = UpstreamVariant::Noop(NoopUpstream);
@@ -106,7 +108,6 @@ impl App {
             commitment_registry,
             proof_registry,
             config,
-            accumulator_factory,
             storage,
         ))
     }
@@ -150,7 +151,6 @@ impl App {
             let active_namespaces = Arc::clone(&self.active_namespaces);
             let commitment_registry = self.commitment_registry;
             let proof_registry = self.proof_registry;
-            let accumulator_factory = Arc::clone(&self.accumulator_factory);
             let config = self.config.clone();
             
             thread::spawn(move || {
@@ -164,7 +164,6 @@ impl App {
                     active_namespaces,
                     commitment_registry,
                     proof_registry,
-                    accumulator_factory,
                     config,
                 )
             })
@@ -197,7 +196,6 @@ impl App {
         active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
         commitment_registry: CommitmentRegistryVariant,
         proof_registry: ProofRegistryVariant,
-        accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
         config: BaseConfig,
     ) -> Result<()> {
         loop {
@@ -219,7 +217,6 @@ impl App {
                     &active_namespaces,
                     &commitment_registry,
                     &proof_registry,
-                    &accumulator_factory,
                     &config,
                 )?;
                 
@@ -266,7 +263,6 @@ impl App {
                             &active_namespaces,
                             &commitment_registry,
                             &proof_registry,
-                            &accumulator_factory,
                             &config,
                         )?;
                     }
@@ -288,7 +284,6 @@ impl App {
         active_namespaces: &Arc<Mutex<HashMap<Namespace, bool>>>,
         commitment_registry: &CommitmentRegistryVariant,
         proof_registry: &ProofRegistryVariant,
-        accumulator_factory: &Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
         config: &BaseConfig,
     ) -> Result<()> {
         info!("Starting commit phase");
@@ -314,7 +309,7 @@ impl App {
                 committed_at,
                 commitment_registry,
                 proof_registry,
-                accumulator_factory,
+                config.accumulator_type,
             )?;
         }
         
@@ -340,7 +335,7 @@ impl App {
         committed_at: u64,
         commitment_registry: &CommitmentRegistryVariant,
         proof_registry: &ProofRegistryVariant,
-        accumulator_factory: &Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
+        accumulator_type: AccumulatorType,
     ) -> Result<()> {
         let storage_guard = storage.lock().unwrap();
         
@@ -359,7 +354,7 @@ impl App {
         info!("Committing {} records for namespace {:?}", records.len(), namespace);
         
         // Create accumulator
-        let mut accumulator = (accumulator_factory)();
+        let mut accumulator = Self::create_accumulator(accumulator_type);
         
         // Add all records to accumulator
         for record in &records {
@@ -420,7 +415,6 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::CommitmentFilterOptions;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]

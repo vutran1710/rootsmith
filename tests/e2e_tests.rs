@@ -1,13 +1,12 @@
 use anyhow::Result;
 use rootsmith::*;
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
 use rootsmith::upstream::{UpstreamVariant, MockUpstream};
 use rootsmith::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
 use rootsmith::proof_registry::{ProofRegistryVariant, MockProofRegistry};
-use rootsmith::crypto::{AccumulatorVariant, MockAccumulator};
+use rootsmith::config::AccumulatorType;
 
 // ===== Test Helper Functions =====
 
@@ -47,6 +46,7 @@ fn test_e2e_app_run() -> Result<()> {
         storage_path: storage_path.to_str().unwrap().to_string(),
         batch_interval_secs: 1,
         auto_commit: true,
+        accumulator_type: AccumulatorType::Mock,
     };
 
     // Create test data
@@ -74,17 +74,12 @@ fn test_e2e_app_run() -> Result<()> {
     let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
     let proof_registry = ProofRegistryVariant::Mock(MockProofRegistry::new());
 
-    // Create accumulator factory
-    let accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync> =
-        Arc::new(|| AccumulatorVariant::Mock(MockAccumulator::new()));
-
     // Create App
     let app = App::new(
         upstream,
         commitment_registry_variant,
         proof_registry,
         config,
-        accumulator_factory,
         storage,
     );
 
