@@ -1,4 +1,6 @@
 use anyhow::Result;
+use crossbeam_channel::Sender;
+use crate::types::IncomingRecord;
 
 /// Trait for upstream data sources (websocket, Kafka, SQS, MQTT, etc.).
 ///
@@ -8,13 +10,13 @@ pub trait UpstreamConnector: Send + Sync {
     /// Human-readable connector name for logging.
     fn name(&self) -> &'static str;
 
-    /// Open/start the connector.
+    /// Open/start the connector with a channel to send records.
     ///
     /// Typical implementation:
     /// - spawn a thread / async task,
     /// - read from external source,
-    /// - push `IncomingRecord`s into a channel owned by the app.
-    fn open(&mut self) -> Result<()>;
+    /// - push `IncomingRecord`s into the provided channel.
+    fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()>;
 
     /// Close/stop the connector and release resources.
     fn close(&mut self) -> Result<()>;

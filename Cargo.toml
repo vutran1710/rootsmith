@@ -38,3 +38,4 @@ proof-github = []
 proof-contract = []
 
 [dev-dependencies]
+tempfile = "3"
