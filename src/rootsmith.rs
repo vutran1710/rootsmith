@@ -324,7 +324,7 @@ impl RootSmith {
         accumulator_type: AccumulatorType,
     ) -> Result<()> {
         // Scan storage and prepare data (release lock before async operations)
-        let (_records, root, record_count) = {
+        let (root, record_count) = {
             let storage_guard = storage.lock().unwrap();
             
             // Scan storage for this namespace up to committed_at
@@ -353,7 +353,7 @@ impl RootSmith {
             let root = accumulator.build_root()?;
             let record_count = records.len();
             
-            (records, root, record_count)
+            (root, record_count)
             // storage_guard is dropped here
         };
         
