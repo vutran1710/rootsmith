@@ -74,14 +74,11 @@ impl Accumulator for MerkleAccumulator {
         Ok(self.leaves.contains(&target_leaf))
     }
 
-    fn verify_non_inclusion(&self, key: &Key32) -> Result<bool> {
-        // For a standard Merkle tree, we can't prove non-inclusion easily
-        // We check if no leaf starts with this key
-        let key_prefix = Sha256::hash(key);
-        Ok(!self
-            .leaves
-            .iter()
-            .any(|leaf| leaf[..16] == key_prefix[..16]))
+    fn verify_non_inclusion(&self, _key: &Key32) -> Result<bool> {
+        // Note: Standard Merkle trees do not support non-inclusion proofs.
+        // This method returns false as a safe default, indicating we cannot
+        // prove non-inclusion. For proper non-inclusion support, use SparseMerkleAccumulator.
+        Ok(false)
     }
 
     fn flush(&mut self) -> Result<()> {

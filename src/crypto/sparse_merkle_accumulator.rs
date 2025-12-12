@@ -72,7 +72,10 @@ impl Accumulator for SparseMerkleAccumulator {
             Some(stored_hash) => {
                 // Compare stored value with provided value
                 if value.len() == 32 {
-                    let value_hash = Hash::from(<[u8; 32]>::try_from(value).unwrap());
+                    let value_array: [u8; 32] = value
+                        .try_into()
+                        .map_err(|_| anyhow::anyhow!("Invalid value length"))?;
+                    let value_hash = Hash::from(value_array);
                     Ok(stored_hash == value_hash)
                 } else {
                     Ok(false)
