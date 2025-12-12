@@ -1,5 +1,25 @@
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
+
+/// Type of cryptographic accumulator backend to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccumulatorType {
+    /// Simple accumulator (basic implementation).
+    Simple,
+    /// Merkle tree accumulator.
+    Merkle,
+    /// Sparse Merkle tree accumulator.
+    SparseMerkle,
+    /// Mock accumulator (for testing).
+    Mock,
+}
+
+impl Default for AccumulatorType {
+    fn default() -> Self {
+        AccumulatorType::Simple
+    }
+}
 
 /// Base configuration for the app.
 /// Concrete CLI parsing (clap) can be built on top of this.
@@ -19,6 +39,10 @@ pub struct BaseConfig {
     /// Whether to auto-flush and commit when a batch window closes.
     #[arg(long, default_value_t = true)]
     pub auto_commit: bool,
+
+    /// Type of cryptographic accumulator backend to use.
+    #[arg(long, value_enum, default_value_t = AccumulatorType::default())]
+    pub accumulator_type: AccumulatorType,
 }
 
 impl Default for BaseConfig {
@@ -27,6 +51,7 @@ impl Default for BaseConfig {
             storage_path: "./data".to_string(),
             batch_interval_secs: 86400, // 1 day
             auto_commit: true,
+            accumulator_type: AccumulatorType::default(),
         }
     }
 }
