@@ -1,7 +1,5 @@
 use anyhow::Result;
 use ::rootsmith::*;
-use std::thread;
-use std::time::Duration;
 
 use ::rootsmith::upstream::{UpstreamVariant, MockUpstream};
 use ::rootsmith::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
