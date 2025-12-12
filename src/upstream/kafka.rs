@@ -1,11 +1,9 @@
 use anyhow::Result;
-use crate::types::Block;
-use super::UpstreamSource;
+use crate::traits::UpstreamConnector;
 
 pub struct KafkaSource {
     brokers: String,
     topic: String,
-    connected: bool,
 }
 
 impl KafkaSource {
@@ -13,28 +11,24 @@ impl KafkaSource {
         Self {
             brokers,
             topic,
-            connected: false,
         }
     }
 }
 
-impl UpstreamSource for KafkaSource {
-    fn connect(&mut self) -> Result<()> {
-        tracing::info!("Connecting to Kafka: {} topic: {}", self.brokers, self.topic);
-        self.connected = true;
+impl UpstreamConnector for KafkaSource {
+    fn name(&self) -> &'static str {
+        "kafka"
+    }
+
+    fn open(&mut self) -> Result<()> {
+        tracing::info!("Opening Kafka connection: {} topic: {}", self.brokers, self.topic);
+        // TODO: Implement actual Kafka connection
         Ok(())
     }
 
-    fn receive_block(&mut self) -> Result<Option<Block>> {
-        if !self.connected {
-            anyhow::bail!("Not connected");
-        }
-        Ok(None)
-    }
-
-    fn disconnect(&mut self) -> Result<()> {
-        tracing::info!("Disconnecting from Kafka");
-        self.connected = false;
+    fn close(&mut self) -> Result<()> {
+        tracing::info!("Closing Kafka connection");
+        // TODO: Implement actual Kafka disconnection
         Ok(())
     }
 }

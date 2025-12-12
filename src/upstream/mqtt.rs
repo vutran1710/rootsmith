@@ -1,11 +1,9 @@
 use anyhow::Result;
-use crate::types::Block;
-use super::UpstreamSource;
+use crate::traits::UpstreamConnector;
 
 pub struct MqttSource {
     broker: String,
     topic: String,
-    connected: bool,
 }
 
 impl MqttSource {
@@ -13,28 +11,24 @@ impl MqttSource {
         Self {
             broker,
             topic,
-            connected: false,
         }
     }
 }
 
-impl UpstreamSource for MqttSource {
-    fn connect(&mut self) -> Result<()> {
-        tracing::info!("Connecting to MQTT: {} topic: {}", self.broker, self.topic);
-        self.connected = true;
+impl UpstreamConnector for MqttSource {
+    fn name(&self) -> &'static str {
+        "mqtt"
+    }
+
+    fn open(&mut self) -> Result<()> {
+        tracing::info!("Opening MQTT connection: {} topic: {}", self.broker, self.topic);
+        // TODO: Implement actual MQTT connection
         Ok(())
     }
 
-    fn receive_block(&mut self) -> Result<Option<Block>> {
-        if !self.connected {
-            anyhow::bail!("Not connected");
-        }
-        Ok(None)
-    }
-
-    fn disconnect(&mut self) -> Result<()> {
-        tracing::info!("Disconnecting from MQTT");
-        self.connected = false;
+    fn close(&mut self) -> Result<()> {
+        tracing::info!("Closing MQTT connection");
+        // TODO: Implement actual MQTT disconnection
         Ok(())
     }
 }

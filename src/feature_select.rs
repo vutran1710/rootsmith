@@ -1,5 +1,4 @@
-use crate::types::Feature;
-
+// Feature selection module - placeholder for future feature flags
 pub struct FeatureSelector {
     enabled_features: Vec<String>,
 }
@@ -9,16 +8,8 @@ impl FeatureSelector {
         Self { enabled_features }
     }
 
-    pub fn is_enabled(&self, feature: &Feature) -> bool {
-        self.enabled_features.contains(&feature.name)
-    }
-
-    pub fn select(&self, features: &[Feature]) -> Vec<Feature> {
-        features
-            .iter()
-            .filter(|f| self.is_enabled(f))
-            .cloned()
-            .collect()
+    pub fn is_enabled(&self, feature_name: &str) -> bool {
+        self.enabled_features.contains(&feature_name.to_string())
     }
 }
 

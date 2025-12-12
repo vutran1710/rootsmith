@@ -1,38 +1,30 @@
 use anyhow::Result;
-use crate::types::Block;
-use super::UpstreamSource;
+use crate::traits::UpstreamConnector;
 
 pub struct WebSocketSource {
     url: String,
-    connected: bool,
 }
 
 impl WebSocketSource {
     pub fn new(url: String) -> Self {
-        Self {
-            url,
-            connected: false,
-        }
+        Self { url }
     }
 }
 
-impl UpstreamSource for WebSocketSource {
-    fn connect(&mut self) -> Result<()> {
-        tracing::info!("Connecting to WebSocket: {}", self.url);
-        self.connected = true;
+impl UpstreamConnector for WebSocketSource {
+    fn name(&self) -> &'static str {
+        "websocket"
+    }
+
+    fn open(&mut self) -> Result<()> {
+        tracing::info!("Opening WebSocket connection: {}", self.url);
+        // TODO: Implement actual WebSocket connection
         Ok(())
     }
 
-    fn receive_block(&mut self) -> Result<Option<Block>> {
-        if !self.connected {
-            anyhow::bail!("Not connected");
-        }
-        Ok(None)
-    }
-
-    fn disconnect(&mut self) -> Result<()> {
-        tracing::info!("Disconnecting from WebSocket");
-        self.connected = false;
+    fn close(&mut self) -> Result<()> {
+        tracing::info!("Closing WebSocket connection");
+        // TODO: Implement actual WebSocket disconnection
         Ok(())
     }
 }

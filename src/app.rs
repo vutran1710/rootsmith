@@ -230,16 +230,3 @@ where
         Ok(())
     }
 }
-
-// Legacy function - kept for backwards compatibility
-use crate::config::Config;
-use crate::storage::Storage;
-use tracing::info;
-
-pub fn run(config: Config) -> Result<()> {
-    info!("Initializing application with config: {:?}", config);
-    let _storage = Storage::new(&config.storage.path)?;
-    info!("Storage initialized at: {}", config.storage.path);
-    info!("Application running...");
-    Ok(())
-}
