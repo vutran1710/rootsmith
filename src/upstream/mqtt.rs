@@ -1,8 +1,8 @@
+use crate::traits::UpstreamConnector;
+use crate::types::IncomingRecord;
 use anyhow::Result;
 use async_trait::async_trait;
 use kanal::AsyncSender;
-use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
 
 pub struct MqttSource {
     broker: String,
@@ -11,10 +11,7 @@ pub struct MqttSource {
 
 impl MqttSource {
     pub fn new(broker: String, topic: String) -> Self {
-        Self {
-            broker,
-            topic,
-        }
+        Self { broker, topic }
     }
 }
 
@@ -25,7 +22,11 @@ impl UpstreamConnector for MqttSource {
     }
 
     async fn open(&mut self, _tx: AsyncSender<IncomingRecord>) -> Result<()> {
-        tracing::info!("Opening MQTT connection: {} topic: {}", self.broker, self.topic);
+        tracing::info!(
+            "Opening MQTT connection: {} topic: {}",
+            self.broker,
+            self.topic
+        );
         // TODO: Implement actual MQTT connection
         Ok(())
     }

@@ -1,17 +1,13 @@
+use super::{
+    kafka::KafkaSource, mock::MockUpstream, mqtt::MqttSource, noop::NoopUpstream, sqs::SqsSource,
+    websocket::WebSocketSource,
+};
+use crate::config::UpstreamType;
+use crate::traits::UpstreamConnector;
+use crate::types::IncomingRecord;
 use anyhow::Result;
 use async_trait::async_trait;
 use kanal::AsyncSender;
-use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
-use crate::config::UpstreamType;
-use super::{
-    websocket::WebSocketSource, 
-    kafka::KafkaSource, 
-    sqs::SqsSource, 
-    mqtt::MqttSource,
-    noop::NoopUpstream,
-    mock::MockUpstream,
-};
 
 /// Enum representing all possible upstream connector implementations.
 pub enum UpstreamVariant {
@@ -27,10 +23,21 @@ impl UpstreamVariant {
     /// Create a new upstream connector instance based on the specified type.
     pub fn new(upstream_type: UpstreamType) -> Self {
         match upstream_type {
-            UpstreamType::WebSocket => UpstreamVariant::WebSocket(WebSocketSource::new("ws://localhost:8080".to_string())),
-            UpstreamType::Kafka => UpstreamVariant::Kafka(KafkaSource::new("localhost:9092".to_string(), "rootsmith".to_string())),
-            UpstreamType::Sqs => UpstreamVariant::Sqs(SqsSource::new("https://sqs.us-east-1.amazonaws.com/queue".to_string(), "us-east-1".to_string())),
-            UpstreamType::Mqtt => UpstreamVariant::Mqtt(MqttSource::new("mqtt://localhost:1883".to_string(), "rootsmith".to_string())),
+            UpstreamType::WebSocket => {
+                UpstreamVariant::WebSocket(WebSocketSource::new("ws://localhost:8080".to_string()))
+            }
+            UpstreamType::Kafka => UpstreamVariant::Kafka(KafkaSource::new(
+                "localhost:9092".to_string(),
+                "rootsmith".to_string(),
+            )),
+            UpstreamType::Sqs => UpstreamVariant::Sqs(SqsSource::new(
+                "https://sqs.us-east-1.amazonaws.com/queue".to_string(),
+                "us-east-1".to_string(),
+            )),
+            UpstreamType::Mqtt => UpstreamVariant::Mqtt(MqttSource::new(
+                "mqtt://localhost:1883".to_string(),
+                "rootsmith".to_string(),
+            )),
             UpstreamType::Noop => UpstreamVariant::Noop(NoopUpstream),
             UpstreamType::Mock => UpstreamVariant::Mock(MockUpstream::default()),
         }
@@ -72,5 +79,3 @@ impl UpstreamConnector for UpstreamVariant {
         }
     }
 }
-
-

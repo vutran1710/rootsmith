@@ -1,30 +1,25 @@
-use anyhow::Result;
-use crate::types::{Key32, Value32};
-use crate::traits::Accumulator;
-use crate::config::AccumulatorType;
 use super::{
-    merkle_accumulator::MerkleAccumulator,
-    sparse_merkle_accumulator::SparseMerkleAccumulator,
-    simple_accumulator::SimpleAccumulator,
-    mock_accumulator::MockAccumulator,
+    merkle_accumulator::MerkleAccumulator, sparse_merkle_accumulator::SparseMerkleAccumulator,
 };
+use crate::config::AccumulatorType;
+use crate::traits::Accumulator;
+use crate::types::{Key32, Value32};
+use anyhow::Result;
 
 /// Enum representing all possible accumulator implementations.
 pub enum AccumulatorVariant {
     Merkle(MerkleAccumulator),
     SparseMerkle(SparseMerkleAccumulator),
-    Simple(SimpleAccumulator),
-    Mock(MockAccumulator),
 }
 
 impl AccumulatorVariant {
     /// Create a new accumulator instance based on the specified type.
     pub fn new(accumulator_type: AccumulatorType) -> Self {
         match accumulator_type {
-            AccumulatorType::Simple => AccumulatorVariant::Simple(SimpleAccumulator::new()),
             AccumulatorType::Merkle => AccumulatorVariant::Merkle(MerkleAccumulator::new()),
-            AccumulatorType::SparseMerkle => AccumulatorVariant::SparseMerkle(SparseMerkleAccumulator::new()),
-            AccumulatorType::Mock => AccumulatorVariant::Mock(MockAccumulator::new()),
+            AccumulatorType::SparseMerkle => {
+                AccumulatorVariant::SparseMerkle(SparseMerkleAccumulator::new())
+            }
         }
     }
 }
@@ -34,8 +29,6 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.id(),
             AccumulatorVariant::SparseMerkle(inner) => inner.id(),
-            AccumulatorVariant::Simple(inner) => inner.id(),
-            AccumulatorVariant::Mock(inner) => inner.id(),
         }
     }
 
@@ -43,8 +36,6 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.put(key, value),
             AccumulatorVariant::SparseMerkle(inner) => inner.put(key, value),
-            AccumulatorVariant::Simple(inner) => inner.put(key, value),
-            AccumulatorVariant::Mock(inner) => inner.put(key, value),
         }
     }
 
@@ -52,8 +43,6 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.build_root(),
             AccumulatorVariant::SparseMerkle(inner) => inner.build_root(),
-            AccumulatorVariant::Simple(inner) => inner.build_root(),
-            AccumulatorVariant::Mock(inner) => inner.build_root(),
         }
     }
 
@@ -61,8 +50,6 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.verify_inclusion(key, value),
             AccumulatorVariant::SparseMerkle(inner) => inner.verify_inclusion(key, value),
-            AccumulatorVariant::Simple(inner) => inner.verify_inclusion(key, value),
-            AccumulatorVariant::Mock(inner) => inner.verify_inclusion(key, value),
         }
     }
 
@@ -70,8 +57,6 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.verify_non_inclusion(key),
             AccumulatorVariant::SparseMerkle(inner) => inner.verify_non_inclusion(key),
-            AccumulatorVariant::Simple(inner) => inner.verify_non_inclusion(key),
-            AccumulatorVariant::Mock(inner) => inner.verify_non_inclusion(key),
         }
     }
 
@@ -79,10 +64,6 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.flush(),
             AccumulatorVariant::SparseMerkle(inner) => inner.flush(),
-            AccumulatorVariant::Simple(inner) => inner.flush(),
-            AccumulatorVariant::Mock(inner) => inner.flush(),
         }
     }
 }
-
-

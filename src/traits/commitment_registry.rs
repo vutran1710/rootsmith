@@ -1,6 +1,6 @@
+use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 
 /// Where commitments are recorded (e.g. smart contract, DB, ledger).
 #[async_trait]

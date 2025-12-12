@@ -1,7 +1,7 @@
+use crate::traits::CommitmentRegistry;
+use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
-use crate::traits::CommitmentRegistry;
 
 pub struct CommitmentContract {
     contract_address: String,
@@ -40,7 +40,8 @@ impl CommitmentRegistry for CommitmentContract {
         filter: &CommitmentFilterOptions,
     ) -> Result<Option<Commitment>> {
         // Find the latest commitment for this namespace with committed_at <= filter.time
-        let result = self.registered
+        let result = self
+            .registered
             .iter()
             .filter(|c| c.namespace == filter.namespace && c.committed_at <= filter.time)
             .max_by_key(|c| c.committed_at)

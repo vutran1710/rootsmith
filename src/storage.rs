@@ -1,8 +1,8 @@
 use anyhow::Result;
-use rocksdb::{Options, DB, Direction, IteratorMode};
+use rocksdb::{Direction, IteratorMode, Options, DB};
 use std::sync::Arc;
 
-use crate::types::{IncomingRecord, Namespace, Key32};
+use crate::types::{IncomingRecord, Key32, Namespace};
 
 const NS_LEN: usize = 32;
 const TS_LEN: usize = 8;
@@ -161,7 +161,7 @@ impl Storage {
 
         let mut count = 0u64;
         let mut keys_to_delete = Vec::new();
-        
+
         for item in iter {
             let (raw_key, _) = item?;
             if raw_key.as_ref() >= end_key.as_ref() {

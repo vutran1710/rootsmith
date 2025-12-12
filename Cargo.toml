@@ -19,6 +19,8 @@ opentelemetry = { version = "0.24", features = ["trace"] }
 tracing-opentelemetry = "0.27"
 tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
+rs_merkle = "1.5.0"
+monotree = "0.4.0"
 
 # optional future deps:
 # rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.

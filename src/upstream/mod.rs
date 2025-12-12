@@ -1,11 +1,11 @@
-pub mod websocket;
 pub mod kafka;
-pub mod sqs;
+pub mod mock;
 pub mod mqtt;
 pub mod noop;
-pub mod mock;
+pub mod sqs;
 pub mod variant;
+pub mod websocket;
 
-pub use variant::UpstreamVariant;
-pub use noop::NoopUpstream;
 pub use mock::MockUpstream;
+pub use noop::NoopUpstream;
+pub use variant::UpstreamVariant;
