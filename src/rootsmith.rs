@@ -25,7 +25,7 @@ pub enum EpochPhase {
 }
 
 /// Main application orchestrator with epoch-based architecture.
-pub struct App {
+pub struct RootSmith {
     /// Upstream connector.
     pub upstream: UpstreamVariant,
 
@@ -48,8 +48,8 @@ pub struct App {
     active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
 }
 
-impl App {
-    /// Create a new App.
+impl RootSmith {
+    /// Create a new RootSmith.
     pub fn new(
         upstream: UpstreamVariant,
         commitment_registry: CommitmentRegistryVariant,
@@ -70,7 +70,7 @@ impl App {
         }
     }
 
-    /// Initialize App with default/noop components for demonstration.
+    /// Initialize RootSmith with default/noop components for demonstration.
     /// In production, this would be replaced with feature-gated concrete implementations.
     pub fn initialize(config: BaseConfig) -> Result<Self> {
         use crate::upstream::NoopUpstream;
@@ -106,7 +106,7 @@ impl App {
         let span = span!(Level::INFO, "app_run");
         let _enter = span.enter();
         
-        info!("Starting App with batch_interval_secs={}", self.config.batch_interval_secs);
+        info!("Starting RootSmith with batch_interval_secs={}", self.config.batch_interval_secs);
         
         // Create unbounded channel for data flow
         let (data_tx, data_rx) = unbounded::<IncomingRecord>();
@@ -168,7 +168,7 @@ impl App {
         upstream_result?;
         process_result?;
         
-        info!("App run completed successfully");
+        info!("RootSmith run completed successfully");
         Ok(())
     }
 
@@ -411,8 +411,8 @@ mod tests {
         assert!(now > 0);
         assert!(now < u64::MAX);
         
-        // Test the App::now_secs function (it's public and associated with App)
-        let app_now = App::now_secs();
+        // Test the RootSmith::now_secs function (it's public and associated with RootSmith)
+        let app_now = RootSmith::now_secs();
         assert!(app_now > 0);
         assert!(app_now < u64::MAX);
         // Should be very close to the previous timestamp

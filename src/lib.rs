@@ -1,6 +1,6 @@
 // Library exports for testing and external use
 
-pub mod app;
+pub mod rootsmith;
 pub mod config;
 pub mod crypto;
 pub mod commitment_registry;
@@ -13,8 +13,10 @@ pub mod types;
 pub mod upstream;
 
 // Re-export commonly used types and traits
-pub use app::App;
-pub use config::{BaseConfig, AccumulatorType};
+pub use rootsmith::RootSmith;
+pub use config::{
+    BaseConfig, AccumulatorType, UpstreamType, CommitmentRegistryType, ProofRegistryType,
+};
 pub use storage::Storage;
 pub use traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector};
 pub use types::{

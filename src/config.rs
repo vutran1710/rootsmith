@@ -1,6 +1,68 @@
 use clap::{Parser, ValueEnum};
 use serde::{Deserialize, Serialize};
 
+/// Type of upstream connector to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpstreamType {
+    /// WebSocket upstream.
+    WebSocket,
+    /// Kafka upstream.
+    Kafka,
+    /// SQS upstream.
+    Sqs,
+    /// MQTT upstream.
+    Mqtt,
+    /// No-op upstream (does nothing).
+    Noop,
+    /// Mock upstream (for testing).
+    Mock,
+}
+
+impl Default for UpstreamType {
+    fn default() -> Self {
+        UpstreamType::Mock
+    }
+}
+
+/// Type of commitment registry to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum CommitmentRegistryType {
+    /// Smart contract commitment registry.
+    Contract,
+    /// No-op commitment registry (does nothing).
+    Noop,
+    /// Mock commitment registry (for testing).
+    Mock,
+}
+
+impl Default for CommitmentRegistryType {
+    fn default() -> Self {
+        CommitmentRegistryType::Mock
+    }
+}
+
+/// Type of proof registry to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum ProofRegistryType {
+    /// S3 proof registry.
+    S3,
+    /// GitHub proof registry.
+    Github,
+    /// No-op proof registry (does nothing).
+    Noop,
+    /// Mock proof registry (for testing).
+    Mock,
+}
+
+impl Default for ProofRegistryType {
+    fn default() -> Self {
+        ProofRegistryType::Mock
+    }
+}
+
 /// Type of cryptographic accumulator backend to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]

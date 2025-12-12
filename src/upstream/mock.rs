@@ -15,6 +15,15 @@ impl MockUpstream {
     }
 }
 
+impl Default for MockUpstream {
+    fn default() -> Self {
+        Self {
+            records: Vec::new(),
+            delay_ms: 0,
+        }
+    }
+}
+
 impl UpstreamConnector for MockUpstream {
     fn name(&self) -> &'static str {
         "mock-upstream"

@@ -1,6 +1,7 @@
 use anyhow::Result;
 use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use crate::traits::CommitmentRegistry;
+use crate::config::CommitmentRegistryType;
 use super::{
     commitment_contract::CommitmentContract, 
     commitment_noop::CommitmentNoop,
@@ -12,6 +13,17 @@ pub enum CommitmentRegistryVariant {
     Contract(CommitmentContract),
     Noop(CommitmentNoop),
     Mock(MockCommitmentRegistry),
+}
+
+impl CommitmentRegistryVariant {
+    /// Create a new commitment registry instance based on the specified type.
+    pub fn new(registry_type: CommitmentRegistryType) -> Self {
+        match registry_type {
+            CommitmentRegistryType::Contract => CommitmentRegistryVariant::Contract(CommitmentContract::new("0x0000000000000000000000000000000000000000".to_string())),
+            CommitmentRegistryType::Noop => CommitmentRegistryVariant::Noop(CommitmentNoop::new()),
+            CommitmentRegistryType::Mock => CommitmentRegistryVariant::Mock(MockCommitmentRegistry::new()),
+        }
+    }
 }
 
 impl CommitmentRegistry for CommitmentRegistryVariant {
