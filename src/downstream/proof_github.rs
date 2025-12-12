@@ -1,6 +1,6 @@
 use anyhow::Result;
-use crate::types::Proof;
-use super::ProofRegistry;
+use crate::types::StoredProof;
+use crate::traits::ProofRegistry;
 
 pub struct ProofGithub {
     repo: String,
@@ -14,23 +14,19 @@ impl ProofGithub {
 }
 
 impl ProofRegistry for ProofGithub {
-    fn store(&mut self, proof: &Proof) -> Result<String> {
-        let proof_id = format!("proof_{}_{}", proof.block_number, uuid::Uuid::new_v4());
+    fn name(&self) -> &'static str {
+        "github"
+    }
+
+    fn save_proof(&self, proof: &StoredProof) -> Result<()> {
+        let proof_id = format!("proof_{:?}_{}", proof.key, uuid::Uuid::new_v4());
         tracing::info!(
             "Storing proof to GitHub: repo={}, branch={}, id={}",
             self.repo,
             self.branch,
             proof_id
         );
-        Ok(proof_id)
-    }
-
-    fn retrieve(&self, proof_id: &str) -> Result<Option<Proof>> {
-        tracing::info!(
-            "Retrieving proof from GitHub: repo={}, id={}",
-            self.repo,
-            proof_id
-        );
-        Ok(None)
+        // In a real implementation, this would commit to GitHub
+        Ok(())
     }
 }

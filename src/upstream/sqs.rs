@@ -1,11 +1,9 @@
 use anyhow::Result;
-use crate::types::Block;
-use super::UpstreamSource;
+use crate::traits::UpstreamConnector;
 
 pub struct SqsSource {
     queue_url: String,
     region: String,
-    connected: bool,
 }
 
 impl SqsSource {
@@ -13,28 +11,24 @@ impl SqsSource {
         Self {
             queue_url,
             region,
-            connected: false,
         }
     }
 }
 
-impl UpstreamSource for SqsSource {
-    fn connect(&mut self) -> Result<()> {
-        tracing::info!("Connecting to SQS: {} region: {}", self.queue_url, self.region);
-        self.connected = true;
+impl UpstreamConnector for SqsSource {
+    fn name(&self) -> &'static str {
+        "sqs"
+    }
+
+    fn open(&mut self) -> Result<()> {
+        tracing::info!("Opening SQS connection: {} region: {}", self.queue_url, self.region);
+        // TODO: Implement actual SQS connection
         Ok(())
     }
 
-    fn receive_block(&mut self) -> Result<Option<Block>> {
-        if !self.connected {
-            anyhow::bail!("Not connected");
-        }
-        Ok(None)
-    }
-
-    fn disconnect(&mut self) -> Result<()> {
-        tracing::info!("Disconnecting from SQS");
-        self.connected = false;
+    fn close(&mut self) -> Result<()> {
+        tracing::info!("Closing SQS connection");
+        // TODO: Implement actual SQS disconnection
         Ok(())
     }
 }

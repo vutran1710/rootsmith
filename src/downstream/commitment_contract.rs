@@ -1,6 +1,6 @@
 use anyhow::Result;
-use crate::types::Commitment;
-use super::CommitmentRegistry;
+use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
+use crate::traits::CommitmentRegistry;
 
 pub struct CommitmentContract {
     contract_address: String,
@@ -17,21 +17,32 @@ impl CommitmentContract {
 }
 
 impl CommitmentRegistry for CommitmentContract {
-    fn register(&mut self, commitment: &Commitment) -> Result<()> {
+    fn name(&self) -> &'static str {
+        "contract"
+    }
+
+    fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
         tracing::info!(
-            "Registering commitment to contract {}: epoch={}, root={}",
+            "Registering commitment to contract {}: namespace={:?}, root={:?}, committed_at={}",
             self.contract_address,
-            commitment.epoch,
-            commitment.merkle_root
+            meta.commitment.namespace,
+            meta.commitment.root,
+            meta.commitment.committed_at
         );
-        self.registered.push(commitment.clone());
+        // In a real implementation, this would interact with a smart contract
         Ok(())
     }
 
-    fn verify(&self, commitment: &Commitment) -> Result<bool> {
-        let found = self.registered.iter().any(|c| {
-            c.epoch == commitment.epoch && c.merkle_root == commitment.merkle_root
-        });
-        Ok(found)
+    fn get_prev_commitment(
+        &self,
+        filter: &CommitmentFilterOptions,
+    ) -> Result<Option<Commitment>> {
+        // Find the latest commitment for this namespace with committed_at <= filter.time
+        let result = self.registered
+            .iter()
+            .filter(|c| c.namespace == filter.namespace && c.committed_at <= filter.time)
+            .max_by_key(|c| c.committed_at)
+            .cloned();
+        Ok(result)
     }
 }

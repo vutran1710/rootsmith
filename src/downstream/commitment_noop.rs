@@ -1,6 +1,6 @@
 use anyhow::Result;
-use crate::types::Commitment;
-use super::CommitmentRegistry;
+use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
+use crate::traits::CommitmentRegistry;
 
 pub struct CommitmentNoop;
 
@@ -17,16 +17,25 @@ impl Default for CommitmentNoop {
 }
 
 impl CommitmentRegistry for CommitmentNoop {
-    fn register(&mut self, commitment: &Commitment) -> Result<()> {
+    fn name(&self) -> &'static str {
+        "noop"
+    }
+
+    fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
         tracing::info!(
-            "Noop commitment registration: epoch={}, root={}",
-            commitment.epoch,
-            commitment.merkle_root
+            "Noop commitment registration: namespace={:?}, root={:?}, committed_at={}",
+            meta.commitment.namespace,
+            meta.commitment.root,
+            meta.commitment.committed_at
         );
         Ok(())
     }
 
-    fn verify(&self, _commitment: &Commitment) -> Result<bool> {
-        Ok(true)
+    fn get_prev_commitment(
+        &self,
+        _filter: &CommitmentFilterOptions,
+    ) -> Result<Option<Commitment>> {
+        // Noop registry doesn't store anything
+        Ok(None)
     }
 }
