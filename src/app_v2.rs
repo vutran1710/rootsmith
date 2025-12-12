@@ -83,7 +83,7 @@ where
     pub fn now_secs() -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
-            .unwrap()
+            .expect("System time is before UNIX_EPOCH - please check your system clock")
             .as_secs()
     }
 
@@ -412,6 +412,14 @@ mod tests {
         key
     }
 
+    fn test_now() -> u64 {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before UNIX_EPOCH")
+            .as_secs()
+    }
+
     // ===== E2E Tests =====
 
     #[test]
@@ -434,7 +442,7 @@ mod tests {
         // Create test data
         let namespace1 = test_namespace(1);
         let namespace2 = test_namespace(2);
-        let base_timestamp = AppV2::<MockUpstreamConnector, MockCommitmentRegistry, MockProofRegistry>::now_secs();
+        let base_timestamp = test_now();
 
         let mut test_records = vec![];
         
@@ -549,7 +557,7 @@ mod tests {
         };
 
         let namespace = test_namespace(42);
-        let base_timestamp = AppV2::<MockUpstreamConnector, MockCommitmentRegistry, MockProofRegistry>::now_secs();
+        let base_timestamp = test_now();
 
         let record = IncomingRecord {
             namespace,
@@ -619,7 +627,7 @@ mod tests {
         };
 
         let namespace = test_namespace(99);
-        let base_timestamp = AppV2::<MockUpstreamConnector, MockCommitmentRegistry, MockProofRegistry>::now_secs();
+        let base_timestamp = test_now();
 
         let upstream = MockUpstreamConnector::new(vec![], 0);
         let commitment_registry = MockCommitmentRegistry::new();
@@ -653,7 +661,7 @@ mod tests {
 
         // Cycle 2
         println!("Cycle 2: Adding 3 records");
-        let cycle2_timestamp = AppV2::<MockUpstreamConnector, MockCommitmentRegistry, MockProofRegistry>::now_secs();
+        let cycle2_timestamp = test_now();
         for i in 10..13 {
             app.handle_incoming_record(IncomingRecord {
                 namespace,

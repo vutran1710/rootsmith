@@ -13,12 +13,6 @@ mod app;
 mod app_v2;
 mod traits;
 
-// Re-export commonly used types for internal use
-use config::BaseConfig;
-use traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector, Leaf};
-use app::App;
-use app_v2::AppV2;
-
 fn main() -> Result<()> {
     telemetry::init();
     info!("Starting rootsmith");
