@@ -1,7 +1,7 @@
-use anyhow::Result;
-use crate::types::{Key32, Value32};
 use crate::traits::Accumulator;
-use rs_merkle::{MerkleTree as RsMerkleTree, algorithms::Sha256, Hasher};
+use crate::types::{Key32, Value32};
+use anyhow::Result;
+use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree as RsMerkleTree};
 
 /// Merkle tree based accumulator using rs-merkle library.
 pub struct MerkleAccumulator {
@@ -16,7 +16,7 @@ impl MerkleAccumulator {
             tree: None,
         }
     }
-    
+
     fn rebuild_tree(&mut self) {
         if self.leaves.is_empty() {
             self.tree = None;
@@ -53,10 +53,10 @@ impl Accumulator for MerkleAccumulator {
         if self.leaves.is_empty() {
             return Ok(vec![0u8; 32]);
         }
-        
+
         // Build tree if not already built
         let tree = RsMerkleTree::<Sha256>::from_leaves(&self.leaves);
-        
+
         match tree.root() {
             Some(root) => Ok(root.to_vec()),
             None => Ok(vec![0u8; 32]),
@@ -69,7 +69,7 @@ impl Accumulator for MerkleAccumulator {
         data.extend_from_slice(key);
         data.extend_from_slice(value);
         let target_leaf = Sha256::hash(&data);
-        
+
         // Check if this leaf exists in our leaves
         Ok(self.leaves.contains(&target_leaf))
     }
@@ -78,7 +78,10 @@ impl Accumulator for MerkleAccumulator {
         // For a standard Merkle tree, we can't prove non-inclusion easily
         // We check if no leaf starts with this key
         let key_prefix = Sha256::hash(key);
-        Ok(!self.leaves.iter().any(|leaf| leaf[..16] == key_prefix[..16]))
+        Ok(!self
+            .leaves
+            .iter()
+            .any(|leaf| leaf[..16] == key_prefix[..16]))
     }
 
     fn flush(&mut self) -> Result<()> {

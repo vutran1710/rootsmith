@@ -1,10 +1,10 @@
-use anyhow::Result;
 use ::rootsmith::*;
+use anyhow::Result;
 
-use ::rootsmith::upstream::{UpstreamVariant, MockUpstream};
 use ::rootsmith::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
-use ::rootsmith::proof_registry::{ProofRegistryVariant, MockProofRegistry};
 use ::rootsmith::config::AccumulatorType;
+use ::rootsmith::proof_registry::{MockProofRegistry, ProofRegistryVariant};
+use ::rootsmith::upstream::{MockUpstream, UpstreamVariant};
 
 // ===== Test Helper Functions =====
 
@@ -52,7 +52,7 @@ async fn test_e2e_app_run() -> Result<()> {
     let base_timestamp = test_now();
 
     let mut test_records = vec![];
-    
+
     // Add 3 records
     for i in 0..3 {
         test_records.push(IncomingRecord {
@@ -90,9 +90,10 @@ async fn test_e2e_app_run() -> Result<()> {
     tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
     // Wait for app task to finish
-    let result = app_handle.await
+    let result = app_handle
+        .await
         .map_err(|_| anyhow::anyhow!("RootSmith task panicked"))?;
-    
+
     result?;
 
     // Verify results
@@ -112,12 +113,19 @@ async fn test_e2e_app_run() -> Result<()> {
         .iter()
         .filter(|c| c.commitment.namespace == namespace1)
         .collect();
-    assert!(!ns1_commitments.is_empty(), "Missing commitment for namespace1");
-    
+    assert!(
+        !ns1_commitments.is_empty(),
+        "Missing commitment for namespace1"
+    );
+
     // Sum up all leaves committed for this namespace
     let total_leaves: u64 = ns1_commitments.iter().map(|c| c.leaf_count).sum();
     assert_eq!(total_leaves, 3, "Expected 3 total leaves committed");
-    println!("✓ Namespace1: {} leaves committed across {} commit(s)", total_leaves, ns1_commitments.len());
+    println!(
+        "✓ Namespace1: {} leaves committed across {} commit(s)",
+        total_leaves,
+        ns1_commitments.len()
+    );
 
     println!("\n=== E2E Test Passed! ===\n");
 
@@ -129,10 +137,7 @@ async fn test_accumulator_type_configuration() -> Result<()> {
     println!("\n=== Test: Different accumulator types configuration ===\n");
 
     // Test that each accumulator type can be configured and creates the correct variant
-    let accumulator_types = vec![
-        AccumulatorType::Merkle,
-        AccumulatorType::SparseMerkle,
-    ];
+    let accumulator_types = vec![AccumulatorType::Merkle, AccumulatorType::SparseMerkle];
 
     for acc_type in accumulator_types {
         println!("Testing accumulator type: {:?}", acc_type);
@@ -187,9 +192,10 @@ async fn test_accumulator_type_configuration() -> Result<()> {
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
         // Wait for app task to finish
-        let result = app_handle.await
+        let result = app_handle
+            .await
             .map_err(|_| anyhow::anyhow!("RootSmith task panicked"))?;
-        
+
         result?;
 
         // Verify commitment was created (accumulator worked)

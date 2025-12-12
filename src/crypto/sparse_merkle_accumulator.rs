@@ -1,8 +1,8 @@
-use anyhow::Result;
-use crate::types::{Key32, Value32};
 use crate::traits::Accumulator;
-use monotree::{Monotree, Hash};
+use crate::types::{Key32, Value32};
+use anyhow::Result;
 use monotree::database::MemoryDB;
+use monotree::{Hash, Monotree};
 use std::sync::Mutex;
 
 /// Sparse Merkle tree based accumulator using monotree library.
@@ -35,16 +35,17 @@ impl Accumulator for SparseMerkleAccumulator {
         // Convert key and value to Hash type
         let key_hash = Hash::from(key);
         let value_hash = Hash::from(value);
-        
+
         // Insert into sparse merkle tree and update root
         let mut tree = self.tree.lock().unwrap();
         let mut root = self.root.lock().unwrap();
-        
-        let new_root = tree.insert(root.as_ref(), &key_hash, &value_hash)
+
+        let new_root = tree
+            .insert(root.as_ref(), &key_hash, &value_hash)
             .map_err(|e| anyhow::anyhow!("Failed to insert into tree: {:?}", e))?;
-        
+
         *root = new_root;
-        
+
         Ok(())
     }
 
@@ -58,14 +59,15 @@ impl Accumulator for SparseMerkleAccumulator {
 
     fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {
         let key_hash = Hash::from(*key);
-        
+
         // Get the value from the tree
         let mut tree = self.tree.lock().unwrap();
         let root = self.root.lock().unwrap();
-        
-        let stored_value = tree.get(root.as_ref(), &key_hash)
+
+        let stored_value = tree
+            .get(root.as_ref(), &key_hash)
             .map_err(|e| anyhow::anyhow!("Failed to get from tree: {:?}", e))?;
-        
+
         match stored_value {
             Some(stored_hash) => {
                 // Compare stored value with provided value
@@ -75,18 +77,19 @@ impl Accumulator for SparseMerkleAccumulator {
                 } else {
                     Ok(false)
                 }
-            },
+            }
             None => Ok(false),
         }
     }
 
     fn verify_non_inclusion(&self, key: &Key32) -> Result<bool> {
         let key_hash = Hash::from(*key);
-        
+
         let mut tree = self.tree.lock().unwrap();
         let root = self.root.lock().unwrap();
-        
-        let stored_value = tree.get(root.as_ref(), &key_hash)
+
+        let stored_value = tree
+            .get(root.as_ref(), &key_hash)
             .map_err(|e| anyhow::anyhow!("Failed to get from tree: {:?}", e))?;
         Ok(stored_value.is_none())
     }
@@ -95,7 +98,7 @@ impl Accumulator for SparseMerkleAccumulator {
         // Create a new tree and reset root
         let mut tree = self.tree.lock().unwrap();
         let mut root = self.root.lock().unwrap();
-        
+
         *tree = Monotree::default();
         *root = None;
         Ok(())

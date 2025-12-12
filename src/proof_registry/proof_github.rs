@@ -1,7 +1,7 @@
+use crate::traits::ProofRegistry;
+use crate::types::StoredProof;
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::types::StoredProof;
-use crate::traits::ProofRegistry;
 
 pub struct ProofGithub {
     repo: String,

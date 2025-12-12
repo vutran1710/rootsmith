@@ -1,11 +1,10 @@
-use anyhow::Result;
-use crate::types::{Key32, Value32};
-use crate::traits::Accumulator;
-use crate::config::AccumulatorType;
 use super::{
-    merkle_accumulator::MerkleAccumulator,
-    sparse_merkle_accumulator::SparseMerkleAccumulator,
+    merkle_accumulator::MerkleAccumulator, sparse_merkle_accumulator::SparseMerkleAccumulator,
 };
+use crate::config::AccumulatorType;
+use crate::traits::Accumulator;
+use crate::types::{Key32, Value32};
+use anyhow::Result;
 
 /// Enum representing all possible accumulator implementations.
 pub enum AccumulatorVariant {
@@ -18,7 +17,9 @@ impl AccumulatorVariant {
     pub fn new(accumulator_type: AccumulatorType) -> Self {
         match accumulator_type {
             AccumulatorType::Merkle => AccumulatorVariant::Merkle(MerkleAccumulator::new()),
-            AccumulatorType::SparseMerkle => AccumulatorVariant::SparseMerkle(SparseMerkleAccumulator::new()),
+            AccumulatorType::SparseMerkle => {
+                AccumulatorVariant::SparseMerkle(SparseMerkleAccumulator::new())
+            }
         }
     }
 }
