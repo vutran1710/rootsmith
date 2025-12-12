@@ -10,7 +10,6 @@ mod crypto;
 mod upstream;
 mod downstream;
 mod app;
-mod app_v2;
 mod traits;
 
 fn main() -> Result<()> {
