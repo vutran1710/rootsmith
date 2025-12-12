@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use kanal::Sender;
+use kanal::AsyncSender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
 
@@ -24,7 +24,7 @@ impl UpstreamConnector for SqsSource {
         "sqs"
     }
 
-    async fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, _tx: AsyncSender<IncomingRecord>) -> Result<()> {
         tracing::info!("Opening SQS connection: {} region: {}", self.queue_url, self.region);
         // TODO: Implement actual SQS connection
         Ok(())

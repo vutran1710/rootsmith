@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use kanal::Sender;
+use kanal::AsyncSender;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
 
@@ -31,7 +31,7 @@ impl UpstreamConnector for MockUpstream {
         "mock-upstream"
     }
 
-    async fn open(&mut self, tx: Sender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, tx: AsyncSender<IncomingRecord>) -> Result<()> {
         let records = self.records.clone();
         let delay = self.delay_ms;
 
@@ -40,8 +40,8 @@ impl UpstreamConnector for MockUpstream {
                 if delay > 0 {
                     tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
                 }
-                // kanal send is async
-                if tx.send_async(record).await.is_err() {
+                // kanal async send
+                if tx.send(record).await.is_err() {
                     break;
                 }
             }

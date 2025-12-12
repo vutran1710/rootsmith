@@ -127,13 +127,13 @@ impl RootSmith {
         
         // Task 1: Upstream data ingestion
         let upstream_handle = {
-            let data_tx_clone = data_tx.clone();
+            let async_tx = data_tx.clone();
             let mut upstream = self.upstream;
             tokio::task::spawn(async move {
                 let span = span!(Level::INFO, "upstream_task");
                 let _enter = span.enter();
                 
-                if let Err(e) = upstream.open(data_tx_clone).await {
+                if let Err(e) = upstream.open(async_tx).await {
                     error!("Upstream connector failed: {}", e);
                     return Err(e);
                 }
@@ -235,7 +235,7 @@ impl RootSmith {
                 Duration::from_millis(100),
                 data_rx.recv()
             ).await {
-                Ok(Some(record)) => {
+                Ok(Ok(record)) => {
                     let span = span!(Level::DEBUG, "handle_record", 
                         namespace = ?record.namespace);
                     let _enter = span.enter();
@@ -253,7 +253,7 @@ impl RootSmith {
                     storage_guard.put(&record)?;
                     debug!("Record stored for namespace {:?}", record.namespace);
                 }
-                Ok(None) => {
+                Ok(Err(_)) => {
                     // Channel closed - perform final commit if needed
                     info!("Data channel closed, performing final commit if needed");
                     
