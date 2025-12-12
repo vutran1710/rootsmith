@@ -1,5 +1,7 @@
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
+/// Initialize telemetry with tracing and logging.
+/// OpenTelemetry tracing is integrated via the tracing framework.
 pub fn init() {
     tracing_subscriber::registry()
         .with(
