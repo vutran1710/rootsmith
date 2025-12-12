@@ -67,19 +67,15 @@ impl Default for ProofRegistryType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum AccumulatorType {
-    /// Simple accumulator (basic implementation).
-    Simple,
     /// Merkle tree accumulator.
     Merkle,
     /// Sparse Merkle tree accumulator.
     SparseMerkle,
-    /// Mock accumulator (for testing).
-    Mock,
 }
 
 impl Default for AccumulatorType {
     fn default() -> Self {
-        AccumulatorType::Simple
+        AccumulatorType::Merkle
     }
 }
 

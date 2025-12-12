@@ -44,7 +44,7 @@ async fn test_e2e_app_run() -> Result<()> {
         storage_path: storage_path.to_str().unwrap().to_string(),
         batch_interval_secs: 1,
         auto_commit: true,
-        accumulator_type: AccumulatorType::Mock,
+        accumulator_type: AccumulatorType::Merkle,
     };
 
     // Create test data
@@ -130,10 +130,8 @@ async fn test_accumulator_type_configuration() -> Result<()> {
 
     // Test that each accumulator type can be configured and creates the correct variant
     let accumulator_types = vec![
-        AccumulatorType::Simple,
         AccumulatorType::Merkle,
         AccumulatorType::SparseMerkle,
-        AccumulatorType::Mock,
     ];
 
     for acc_type in accumulator_types {

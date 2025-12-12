@@ -1,17 +1,21 @@
 use anyhow::Result;
 use crate::types::{Key32, Value32};
 use crate::traits::Accumulator;
-use super::sparse_merkle::SparseMerkleTree;
+use monotree::{Monotree, Hash};
+use monotree::database::MemoryDB;
+use std::sync::Mutex;
 
-/// Sparse Merkle tree based accumulator.
+/// Sparse Merkle tree based accumulator using monotree library.
 pub struct SparseMerkleAccumulator {
-    tree: SparseMerkleTree,
+    tree: Mutex<Monotree<MemoryDB>>,
+    root: Mutex<Option<Hash>>,
 }
 
 impl SparseMerkleAccumulator {
     pub fn new() -> Self {
         Self {
-            tree: SparseMerkleTree::new(256),
+            tree: Mutex::new(Monotree::default()),
+            root: Mutex::new(None),
         }
     }
 }
@@ -28,23 +32,72 @@ impl Accumulator for SparseMerkleAccumulator {
     }
 
     fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
-        self.tree.update(key.to_vec(), value.to_vec())
+        // Convert key and value to Hash type
+        let key_hash = Hash::from(key);
+        let value_hash = Hash::from(value);
+        
+        // Insert into sparse merkle tree and update root
+        let mut tree = self.tree.lock().unwrap();
+        let mut root = self.root.lock().unwrap();
+        
+        let new_root = tree.insert(root.as_ref(), &key_hash, &value_hash)
+            .map_err(|e| anyhow::anyhow!("Failed to insert into tree: {:?}", e))?;
+        
+        *root = new_root;
+        
+        Ok(())
     }
 
     fn build_root(&self) -> Result<Vec<u8>> {
-        self.tree.root()
+        let root = self.root.lock().unwrap();
+        match &*root {
+            Some(root_hash) => Ok(root_hash.as_ref().to_vec()),
+            None => Ok(vec![0u8; 32]),
+        }
     }
 
     fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {
-        Ok(self.tree.get(key).map(|v| v.as_slice() == value).unwrap_or(false))
+        let key_hash = Hash::from(*key);
+        
+        // Get the value from the tree
+        let mut tree = self.tree.lock().unwrap();
+        let root = self.root.lock().unwrap();
+        
+        let stored_value = tree.get(root.as_ref(), &key_hash)
+            .map_err(|e| anyhow::anyhow!("Failed to get from tree: {:?}", e))?;
+        
+        match stored_value {
+            Some(stored_hash) => {
+                // Compare stored value with provided value
+                if value.len() == 32 {
+                    let value_hash = Hash::from(<[u8; 32]>::try_from(value).unwrap());
+                    Ok(stored_hash == value_hash)
+                } else {
+                    Ok(false)
+                }
+            },
+            None => Ok(false),
+        }
     }
 
     fn verify_non_inclusion(&self, key: &Key32) -> Result<bool> {
-        Ok(self.tree.get(key).is_none())
+        let key_hash = Hash::from(*key);
+        
+        let mut tree = self.tree.lock().unwrap();
+        let root = self.root.lock().unwrap();
+        
+        let stored_value = tree.get(root.as_ref(), &key_hash)
+            .map_err(|e| anyhow::anyhow!("Failed to get from tree: {:?}", e))?;
+        Ok(stored_value.is_none())
     }
 
     fn flush(&mut self) -> Result<()> {
-        self.tree = SparseMerkleTree::new(256);
+        // Create a new tree and reset root
+        let mut tree = self.tree.lock().unwrap();
+        let mut root = self.root.lock().unwrap();
+        
+        *tree = Monotree::default();
+        *root = None;
         Ok(())
     }
 }
