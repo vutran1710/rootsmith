@@ -1,5 +1,7 @@
 use anyhow::Result;
+use crossbeam_channel::Sender;
 use crate::traits::UpstreamConnector;
+use crate::types::IncomingRecord;
 
 pub struct SqsSource {
     queue_url: String,
@@ -20,7 +22,7 @@ impl UpstreamConnector for SqsSource {
         "sqs"
     }
 
-    fn open(&mut self) -> Result<()> {
+    fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
         tracing::info!("Opening SQS connection: {} region: {}", self.queue_url, self.region);
         // TODO: Implement actual SQS connection
         Ok(())

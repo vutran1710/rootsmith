@@ -1,5 +1,7 @@
 use anyhow::Result;
+use crossbeam_channel::Sender;
 use crate::traits::UpstreamConnector;
+use crate::types::IncomingRecord;
 
 pub struct WebSocketSource {
     url: String,
@@ -16,7 +18,7 @@ impl UpstreamConnector for WebSocketSource {
         "websocket"
     }
 
-    fn open(&mut self) -> Result<()> {
+    fn open(&mut self, _tx: Sender<IncomingRecord>) -> Result<()> {
         tracing::info!("Opening WebSocket connection: {}", self.url);
         // TODO: Implement actual WebSocket connection
         Ok(())
