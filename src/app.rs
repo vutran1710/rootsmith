@@ -144,17 +144,13 @@ where
         let upstream_result = upstream_handle.join()
             .map_err(|_| anyhow::anyhow!("Upstream task panicked"))?;
         
-        if let Err(e) = upstream_result {
-            warn!("Upstream task failed: {}", e);
-            // Even if upstream fails, drop the sender to allow processing to finish
-        }
-        
         // Drop the sender to signal data processing to finish
         drop(data_tx);
         
         let process_result = process_handle.join()
             .map_err(|_| anyhow::anyhow!("Process task panicked"))?;
         
+        upstream_result?;
         process_result?;
         
         info!("App run completed successfully");
@@ -207,18 +203,17 @@ where
                         namespace = ?record.namespace);
                     let _enter = span.enter();
                     
-                    // Track active namespace (lock separately to avoid holding multiple locks)
+                    // Lock storage for writing
+                    let storage_guard = storage.lock().unwrap();
+                    
+                    // Track active namespace
                     {
                         let mut namespaces = active_namespaces.lock().unwrap();
                         namespaces.insert(record.namespace, true);
                     }
                     
-                    // Lock storage for writing and write to storage
-                    {
-                        let storage_guard = storage.lock().unwrap();
-                        storage_guard.put(&record)?;
-                    }
-                    
+                    // Write to storage
+                    storage_guard.put(&record)?;
                     debug!("Record stored for namespace {:?}", record.namespace);
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {
@@ -390,6 +385,139 @@ where
             .as_secs()
     }
 
+}
+
+// ===== Default/Noop Implementations for Demo =====
+
+pub struct NoopUpstream;
+
+impl UpstreamConnector for NoopUpstream {
+    fn name(&self) -> &'static str {
+        "noop-upstream"
+    }
+    
+    fn open(&mut self, _tx: crossbeam_channel::Sender<IncomingRecord>) -> Result<()> {
+        info!("NoopUpstream: open() called - no data to send");
+        Ok(())
+    }
+    
+    fn close(&mut self) -> Result<()> {
+        info!("NoopUpstream: close() called");
+        Ok(())
+    }
+}
+
+pub struct NoopCommitmentRegistry;
+
+impl CommitmentRegistry for NoopCommitmentRegistry {
+    fn name(&self) -> &'static str {
+        "noop-commitment"
+    }
+    
+    fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
+        info!(
+            "NoopCommitmentRegistry: commit {} leaves for namespace {:?}",
+            meta.leaf_count,
+            meta.commitment.namespace
+        );
+        Ok(())
+    }
+    
+    fn get_prev_commitment(
+        &self,
+        _filter: &crate::types::CommitmentFilterOptions,
+    ) -> Result<Option<Commitment>> {
+        Ok(None)
+    }
+}
+
+pub struct NoopProofRegistry;
+
+impl ProofRegistry for NoopProofRegistry {
+    fn name(&self) -> &'static str {
+        "noop-proof"
+    }
+    
+    fn save_proof(&self, _proof: &StoredProof) -> Result<()> {
+        Ok(())
+    }
+    
+    fn save_proofs(&self, _proofs: &[StoredProof]) -> Result<()> {
+        Ok(())
+    }
+}
+
+pub struct SimpleAccumulator {
+    root: Vec<u8>,
+}
+
+impl Accumulator for SimpleAccumulator {
+    fn id(&self) -> &'static str {
+        "simple-accumulator"
+    }
+    
+    fn put(&mut self, key: crate::types::Key32, value: Vec<u8>) -> Result<()> {
+        // Simple XOR-based accumulation
+        for (i, &byte) in key.iter().enumerate() {
+            self.root[i] ^= byte;
+        }
+        for (i, &byte) in value.iter().enumerate() {
+            self.root[i % 32] ^= byte;
+        }
+        Ok(())
+    }
+    
+    fn build_root(&self) -> Result<Vec<u8>> {
+        Ok(self.root.clone())
+    }
+    
+    fn verify_inclusion(&self, _key: &crate::types::Key32, _value: &[u8]) -> Result<bool> {
+        Ok(true)
+    }
+    
+    fn verify_non_inclusion(&self, _key: &crate::types::Key32) -> Result<bool> {
+        Ok(true)
+    }
+    
+    fn flush(&mut self) -> Result<()> {
+        self.root = vec![0u8; 32];
+        Ok(())
+    }
+}
+
+/// Concrete App type with default implementations for demonstration.
+pub type DefaultApp = App<NoopUpstream, NoopCommitmentRegistry, NoopProofRegistry>;
+
+impl DefaultApp {
+    /// Initialize App with default/noop components for demonstration.
+    /// In production, this would be replaced with feature-gated concrete implementations.
+    pub fn initialize(config: BaseConfig) -> Result<Self> {
+        // Initialize storage
+        let storage = Storage::open(&config.storage_path)?;
+        info!("Storage opened at: {}", config.storage_path);
+        
+        // Create accumulator factory
+        let accumulator_factory: Arc<dyn Fn() -> Box<dyn Accumulator> + Send + Sync> =
+            Arc::new(|| {
+                Box::new(SimpleAccumulator { root: vec![0u8; 32] })
+            });
+        
+        // Create upstream connector
+        let upstream = NoopUpstream;
+        
+        // Create registries
+        let commitment_registry = NoopCommitmentRegistry;
+        let proof_registry = NoopProofRegistry;
+        
+        Ok(Self::new(
+            upstream,
+            commitment_registry,
+            proof_registry,
+            config,
+            accumulator_factory,
+            storage,
+        ))
+    }
 }
 
 #[cfg(test)]

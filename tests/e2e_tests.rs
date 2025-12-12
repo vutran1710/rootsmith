@@ -222,7 +222,6 @@ fn test_e2e_app_run() -> Result<()> {
         storage_path: storage_path.to_str().unwrap().to_string(),
         batch_interval_secs: 1,
         auto_commit: true,
-        max_batch_leaves: None,
     };
 
     // Create test data

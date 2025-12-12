@@ -19,10 +19,6 @@ pub struct BaseConfig {
     /// Whether to auto-flush and commit when a batch window closes.
     #[arg(long, default_value_t = true)]
     pub auto_commit: bool,
-
-    /// Optional: maximum number of leaves per batch before forcing a commit.
-    #[arg(long)]
-    pub max_batch_leaves: Option<u64>,
 }
 
 impl Default for BaseConfig {
@@ -31,7 +27,6 @@ impl Default for BaseConfig {
             storage_path: "./data".to_string(),
             batch_interval_secs: 86400, // 1 day
             auto_commit: true,
-            max_batch_leaves: None,
         }
     }
 }
