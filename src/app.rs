@@ -144,13 +144,17 @@ where
         let upstream_result = upstream_handle.join()
             .map_err(|_| anyhow::anyhow!("Upstream task panicked"))?;
         
+        if let Err(e) = upstream_result {
+            warn!("Upstream task failed: {}", e);
+            // Even if upstream fails, drop the sender to allow processing to finish
+        }
+        
         // Drop the sender to signal data processing to finish
         drop(data_tx);
         
         let process_result = process_handle.join()
             .map_err(|_| anyhow::anyhow!("Process task panicked"))?;
         
-        upstream_result?;
         process_result?;
         
         info!("App run completed successfully");
@@ -203,17 +207,18 @@ where
                         namespace = ?record.namespace);
                     let _enter = span.enter();
                     
-                    // Lock storage for writing
-                    let storage_guard = storage.lock().unwrap();
-                    
-                    // Track active namespace
+                    // Track active namespace (lock separately to avoid holding multiple locks)
                     {
                         let mut namespaces = active_namespaces.lock().unwrap();
                         namespaces.insert(record.namespace, true);
                     }
                     
-                    // Write to storage
-                    storage_guard.put(&record)?;
+                    // Lock storage for writing and write to storage
+                    {
+                        let storage_guard = storage.lock().unwrap();
+                        storage_guard.put(&record)?;
+                    }
+                    
                     debug!("Record stored for namespace {:?}", record.namespace);
                 }
                 Err(crossbeam_channel::RecvTimeoutError::Timeout) => {

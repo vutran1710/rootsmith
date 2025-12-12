@@ -18,7 +18,7 @@ use config::BaseConfig;
 use storage::Storage;
 use app::App;
 use traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector};
-use types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions, IncomingRecord, StoredProof};
+use types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions, IncomingRecord, Key32, StoredProof};
 use crossbeam_channel::Sender;
 
 // Mock implementations for demonstration
@@ -97,7 +97,7 @@ impl Accumulator for SimpleAccumulator {
         "simple-accumulator"
     }
     
-    fn put(&mut self, key: types::Key32, value: Vec<u8>) -> Result<()> {
+    fn put(&mut self, key: Key32, value: Vec<u8>) -> Result<()> {
         // Simple XOR-based accumulation
         for (i, &byte) in key.iter().enumerate() {
             self.root[i] ^= byte;
@@ -112,11 +112,11 @@ impl Accumulator for SimpleAccumulator {
         Ok(self.root.clone())
     }
     
-    fn verify_inclusion(&self, _key: &types::Key32, _value: &[u8]) -> Result<bool> {
+    fn verify_inclusion(&self, _key: &Key32, _value: &[u8]) -> Result<bool> {
         Ok(true)
     }
     
-    fn verify_non_inclusion(&self, _key: &types::Key32) -> Result<bool> {
+    fn verify_non_inclusion(&self, _key: &Key32) -> Result<bool> {
         Ok(true)
     }
     
