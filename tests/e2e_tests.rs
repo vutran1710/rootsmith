@@ -34,7 +34,7 @@ fn test_now() -> u64 {
 
 #[test]
 fn test_e2e_app_run() -> Result<()> {
-    println!("\n=== E2E Test: App.run() with commit cycle ===\n");
+    println!("\n=== E2E Test: RootSmith.run() with commit cycle ===\n");
 
     // Create temporary storage directory
     let temp_dir = tempfile::tempdir()?;
@@ -74,8 +74,8 @@ fn test_e2e_app_run() -> Result<()> {
     let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
     let proof_registry = ProofRegistryVariant::Mock(MockProofRegistry::new());
 
-    // Create App
-    let app = App::new(
+    // Create RootSmith
+    let app = RootSmith::new(
         upstream,
         commitment_registry_variant,
         proof_registry,
@@ -83,7 +83,7 @@ fn test_e2e_app_run() -> Result<()> {
         storage,
     );
 
-    println!("App created, starting run loop in thread...");
+    println!("RootSmith created, starting run loop in thread...");
 
     // Run app in a separate thread with timeout
     let app_handle = thread::spawn(move || app.run());
@@ -93,7 +93,7 @@ fn test_e2e_app_run() -> Result<()> {
 
     // Wait for app thread to finish
     let result = app_handle.join()
-        .map_err(|_| anyhow::anyhow!("App thread panicked"))?;
+        .map_err(|_| anyhow::anyhow!("RootSmith thread panicked"))?;
     
     result?;
 
@@ -172,8 +172,8 @@ fn test_accumulator_type_configuration() -> Result<()> {
         let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
         let proof_registry = ProofRegistryVariant::Mock(MockProofRegistry::new());
 
-        // Create App with specific accumulator type
-        let app = App::new(
+        // Create RootSmith with specific accumulator type
+        let app = RootSmith::new(
             upstream,
             commitment_registry_variant,
             proof_registry,
@@ -192,7 +192,7 @@ fn test_accumulator_type_configuration() -> Result<()> {
 
         // Wait for app thread to finish
         let result = app_handle.join()
-            .map_err(|_| anyhow::anyhow!("App thread panicked"))?;
+            .map_err(|_| anyhow::anyhow!("RootSmith thread panicked"))?;
         
         result?;
 

@@ -11,11 +11,11 @@ mod crypto;
 mod upstream;
 mod commitment_registry;
 mod proof_registry;
-mod app;
+mod rootsmith;
 mod traits;
 
 use config::BaseConfig;
-use app::App;
+use rootsmith::RootSmith;
 
 fn main() -> Result<()> {
     // Initialize telemetry
@@ -28,7 +28,7 @@ fn main() -> Result<()> {
           config.storage_path, config.batch_interval_secs);
     
     // Initialize and run the app
-    let app = App::initialize(config)?;
+    let app = RootSmith::initialize(config)?;
     app.run()?;
     
     info!("Rootsmith shutdown complete");
