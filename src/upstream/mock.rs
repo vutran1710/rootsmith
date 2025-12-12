@@ -35,10 +35,10 @@ impl UpstreamConnector for MockUpstream {
         let records = self.records.clone();
         let delay = self.delay_ms;
 
-        tokio::task::spawn_blocking(move || {
+        tokio::spawn(async move {
             for record in records {
                 if delay > 0 {
-                    std::thread::sleep(std::time::Duration::from_millis(delay));
+                    tokio::time::sleep(tokio::time::Duration::from_millis(delay)).await;
                 }
                 if tx.send(record).is_err() {
                     break;
