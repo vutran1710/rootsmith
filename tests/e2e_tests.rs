@@ -1,12 +1,12 @@
 use anyhow::Result;
-use rootsmith::*;
+use ::rootsmith::*;
 use std::thread;
 use std::time::Duration;
 
-use rootsmith::upstream::{UpstreamVariant, MockUpstream};
-use rootsmith::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
-use rootsmith::proof_registry::{ProofRegistryVariant, MockProofRegistry};
-use rootsmith::config::AccumulatorType;
+use ::rootsmith::upstream::{UpstreamVariant, MockUpstream};
+use ::rootsmith::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
+use ::rootsmith::proof_registry::{ProofRegistryVariant, MockProofRegistry};
+use ::rootsmith::config::AccumulatorType;
 
 // ===== Test Helper Functions =====
 
