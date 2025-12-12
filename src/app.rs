@@ -49,20 +49,6 @@ pub struct App {
 }
 
 impl App {
-    /// Create a new accumulator instance based on the configured type.
-    fn create_accumulator(accumulator_type: AccumulatorType) -> AccumulatorVariant {
-        use crate::crypto::{SimpleAccumulator, MockAccumulator};
-        use crate::crypto::merkle_accumulator::MerkleAccumulator;
-        use crate::crypto::sparse_merkle_accumulator::SparseMerkleAccumulator;
-        
-        match accumulator_type {
-            AccumulatorType::Simple => AccumulatorVariant::Simple(SimpleAccumulator::new()),
-            AccumulatorType::Merkle => AccumulatorVariant::Merkle(MerkleAccumulator::new()),
-            AccumulatorType::SparseMerkle => AccumulatorVariant::SparseMerkle(SparseMerkleAccumulator::new()),
-            AccumulatorType::Mock => AccumulatorVariant::Mock(MockAccumulator::new()),
-        }
-    }
-
     /// Create a new App.
     pub fn new(
         upstream: UpstreamVariant,
@@ -354,7 +340,7 @@ impl App {
         info!("Committing {} records for namespace {:?}", records.len(), namespace);
         
         // Create accumulator
-        let mut accumulator = Self::create_accumulator(accumulator_type);
+        let mut accumulator = AccumulatorVariant::new(accumulator_type);
         
         // Add all records to accumulator
         for record in &records {

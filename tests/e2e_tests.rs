@@ -125,3 +125,89 @@ fn test_e2e_app_run() -> Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_accumulator_type_configuration() -> Result<()> {
+    println!("\n=== Test: Different accumulator types configuration ===\n");
+
+    // Test that each accumulator type can be configured and creates the correct variant
+    let accumulator_types = vec![
+        AccumulatorType::Simple,
+        AccumulatorType::Merkle,
+        AccumulatorType::SparseMerkle,
+        AccumulatorType::Mock,
+    ];
+
+    for acc_type in accumulator_types {
+        println!("Testing accumulator type: {:?}", acc_type);
+
+        // Create temporary storage directory
+        let temp_dir = tempfile::tempdir()?;
+        let storage_path = temp_dir.path().join("test_accumulator_type_db");
+        let storage = Storage::open(storage_path.to_str().unwrap())?;
+
+        // Configure with specific accumulator type
+        let config = BaseConfig {
+            storage_path: storage_path.to_str().unwrap().to_string(),
+            batch_interval_secs: 1,
+            auto_commit: true,
+            accumulator_type: acc_type,
+        };
+
+        // Create test data
+        let namespace1 = test_namespace(1);
+        let base_timestamp = test_now();
+
+        let test_records = vec![IncomingRecord {
+            namespace: namespace1,
+            key: test_key(1),
+            value: vec![1, 2, 3],
+            timestamp: base_timestamp,
+        }];
+
+        // Create mock components
+        let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
+        let commitment_registry = MockCommitmentRegistry::new();
+        let commitment_registry_clone = commitment_registry.clone();
+        let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
+        let proof_registry = ProofRegistryVariant::Mock(MockProofRegistry::new());
+
+        // Create App with specific accumulator type
+        let app = App::new(
+            upstream,
+            commitment_registry_variant,
+            proof_registry,
+            config.clone(),
+            storage,
+        );
+
+        // Verify accumulator type is stored in config
+        assert_eq!(app.config.accumulator_type, acc_type);
+
+        // Run app in a separate thread
+        let app_handle = thread::spawn(move || app.run());
+
+        // Wait for processing
+        thread::sleep(Duration::from_secs(2));
+
+        // Wait for app thread to finish
+        let result = app_handle.join()
+            .map_err(|_| anyhow::anyhow!("App thread panicked"))?;
+        
+        result?;
+
+        // Verify commitment was created (accumulator worked)
+        let commitments = commitment_registry_clone.get_commitments();
+        assert!(
+            !commitments.is_empty(),
+            "Expected commitment for accumulator type {:?}",
+            acc_type
+        );
+
+        println!("✓ Accumulator type {:?} works correctly", acc_type);
+    }
+
+    println!("\n=== All accumulator types test passed! ===\n");
+
+    Ok(())
+}
