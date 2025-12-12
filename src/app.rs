@@ -10,6 +10,10 @@ use crate::storage::Storage;
 use crate::types::{BatchCommitmentMeta, Commitment, IncomingRecord, Namespace, StoredProof};
 use crate::config::BaseConfig;
 use crate::traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector};
+use crate::upstream::UpstreamVariant;
+use crate::commitment_registry::CommitmentRegistryVariant;
+use crate::proof_registry::ProofRegistryVariant;
+use crate::crypto::AccumulatorVariant;
 
 /// Epoch phase for the commit cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -21,26 +25,21 @@ pub enum EpochPhase {
 }
 
 /// Main application orchestrator with epoch-based architecture.
-pub struct App<U, CR, PR>
-where
-    U: UpstreamConnector + 'static,
-    CR: CommitmentRegistry + 'static,
-    PR: ProofRegistry + 'static,
-{
+pub struct App {
     /// Upstream connector.
-    pub upstream: U,
+    pub upstream: UpstreamVariant,
 
     /// Commitment registry implementation.
-    pub commitment_registry: CR,
+    pub commitment_registry: CommitmentRegistryVariant,
 
     /// Proof registry implementation.
-    pub proof_registry: PR,
+    pub proof_registry: ProofRegistryVariant,
 
     /// Global/base configuration.
     pub config: BaseConfig,
 
     /// Factory to create new accumulator instances per namespace.
-    pub accumulator_factory: Arc<dyn Fn() -> Box<dyn Accumulator> + Send + Sync>,
+    pub accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
 
     /// Persistent storage (RocksDB).
     pub storage: Arc<Mutex<Storage>>,
@@ -52,19 +51,14 @@ where
     active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
 }
 
-impl<U, CR, PR> App<U, CR, PR>
-where
-    U: UpstreamConnector + 'static,
-    CR: CommitmentRegistry + 'static,
-    PR: ProofRegistry + 'static,
-{
+impl App {
     /// Create a new App.
     pub fn new(
-        upstream: U,
-        commitment_registry: CR,
-        proof_registry: PR,
+        upstream: UpstreamVariant,
+        commitment_registry: CommitmentRegistryVariant,
+        proof_registry: ProofRegistryVariant,
         config: BaseConfig,
-        accumulator_factory: Arc<dyn Fn() -> Box<dyn Accumulator> + Send + Sync>,
+        accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
         storage: Storage,
     ) -> Self {
         let now = Self::now_secs();
@@ -79,6 +73,42 @@ where
             epoch_start_ts: Arc::new(Mutex::new(now)),
             active_namespaces: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Initialize App with default/noop components for demonstration.
+    /// In production, this would be replaced with feature-gated concrete implementations.
+    pub fn initialize(config: BaseConfig) -> Result<Self> {
+        use crate::upstream::NoopUpstream;
+        use crate::commitment_registry::CommitmentRegistryVariant;
+        use crate::commitment_registry::commitment_noop::CommitmentNoop;
+        use crate::proof_registry::{ProofRegistryVariant, NoopProofRegistry};
+        use crate::crypto::SimpleAccumulator;
+
+        // Initialize storage
+        let storage = Storage::open(&config.storage_path)?;
+        info!("Storage opened at: {}", config.storage_path);
+        
+        // Create accumulator factory
+        let accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync> =
+            Arc::new(|| {
+                AccumulatorVariant::Simple(SimpleAccumulator::new())
+            });
+        
+        // Create upstream connector
+        let upstream = UpstreamVariant::Noop(NoopUpstream);
+        
+        // Create registries
+        let commitment_registry = CommitmentRegistryVariant::Noop(CommitmentNoop::new());
+        let proof_registry = ProofRegistryVariant::Noop(NoopProofRegistry);
+        
+        Ok(Self::new(
+            upstream,
+            commitment_registry,
+            proof_registry,
+            config,
+            accumulator_factory,
+            storage,
+        ))
     }
 
     /// Main run loop with parallel tasks:
@@ -165,9 +195,9 @@ where
         storage: Arc<Mutex<Storage>>,
         epoch_start_ts: Arc<Mutex<u64>>,
         active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
-        commitment_registry: CR,
-        proof_registry: PR,
-        accumulator_factory: Arc<dyn Fn() -> Box<dyn Accumulator> + Send + Sync>,
+        commitment_registry: CommitmentRegistryVariant,
+        proof_registry: ProofRegistryVariant,
+        accumulator_factory: Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
         config: BaseConfig,
     ) -> Result<()> {
         loop {
@@ -256,9 +286,9 @@ where
         storage: &Arc<Mutex<Storage>>,
         epoch_start_ts: &Arc<Mutex<u64>>,
         active_namespaces: &Arc<Mutex<HashMap<Namespace, bool>>>,
-        commitment_registry: &CR,
-        proof_registry: &PR,
-        accumulator_factory: &Arc<dyn Fn() -> Box<dyn Accumulator> + Send + Sync>,
+        commitment_registry: &CommitmentRegistryVariant,
+        proof_registry: &ProofRegistryVariant,
+        accumulator_factory: &Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
         config: &BaseConfig,
     ) -> Result<()> {
         info!("Starting commit phase");
@@ -308,9 +338,9 @@ where
         storage: &Arc<Mutex<Storage>>,
         namespace: &Namespace,
         committed_at: u64,
-        commitment_registry: &CR,
-        proof_registry: &PR,
-        accumulator_factory: &Arc<dyn Fn() -> Box<dyn Accumulator> + Send + Sync>,
+        commitment_registry: &CommitmentRegistryVariant,
+        proof_registry: &ProofRegistryVariant,
+        accumulator_factory: &Arc<dyn Fn() -> AccumulatorVariant + Send + Sync>,
     ) -> Result<()> {
         let storage_guard = storage.lock().unwrap();
         
@@ -387,139 +417,6 @@ where
 
 }
 
-// ===== Default/Noop Implementations for Demo =====
-
-pub struct NoopUpstream;
-
-impl UpstreamConnector for NoopUpstream {
-    fn name(&self) -> &'static str {
-        "noop-upstream"
-    }
-    
-    fn open(&mut self, _tx: crossbeam_channel::Sender<IncomingRecord>) -> Result<()> {
-        info!("NoopUpstream: open() called - no data to send");
-        Ok(())
-    }
-    
-    fn close(&mut self) -> Result<()> {
-        info!("NoopUpstream: close() called");
-        Ok(())
-    }
-}
-
-pub struct NoopCommitmentRegistry;
-
-impl CommitmentRegistry for NoopCommitmentRegistry {
-    fn name(&self) -> &'static str {
-        "noop-commitment"
-    }
-    
-    fn commit(&self, meta: &BatchCommitmentMeta) -> Result<()> {
-        info!(
-            "NoopCommitmentRegistry: commit {} leaves for namespace {:?}",
-            meta.leaf_count,
-            meta.commitment.namespace
-        );
-        Ok(())
-    }
-    
-    fn get_prev_commitment(
-        &self,
-        _filter: &crate::types::CommitmentFilterOptions,
-    ) -> Result<Option<Commitment>> {
-        Ok(None)
-    }
-}
-
-pub struct NoopProofRegistry;
-
-impl ProofRegistry for NoopProofRegistry {
-    fn name(&self) -> &'static str {
-        "noop-proof"
-    }
-    
-    fn save_proof(&self, _proof: &StoredProof) -> Result<()> {
-        Ok(())
-    }
-    
-    fn save_proofs(&self, _proofs: &[StoredProof]) -> Result<()> {
-        Ok(())
-    }
-}
-
-pub struct SimpleAccumulator {
-    root: Vec<u8>,
-}
-
-impl Accumulator for SimpleAccumulator {
-    fn id(&self) -> &'static str {
-        "simple-accumulator"
-    }
-    
-    fn put(&mut self, key: crate::types::Key32, value: Vec<u8>) -> Result<()> {
-        // Simple XOR-based accumulation
-        for (i, &byte) in key.iter().enumerate() {
-            self.root[i] ^= byte;
-        }
-        for (i, &byte) in value.iter().enumerate() {
-            self.root[i % 32] ^= byte;
-        }
-        Ok(())
-    }
-    
-    fn build_root(&self) -> Result<Vec<u8>> {
-        Ok(self.root.clone())
-    }
-    
-    fn verify_inclusion(&self, _key: &crate::types::Key32, _value: &[u8]) -> Result<bool> {
-        Ok(true)
-    }
-    
-    fn verify_non_inclusion(&self, _key: &crate::types::Key32) -> Result<bool> {
-        Ok(true)
-    }
-    
-    fn flush(&mut self) -> Result<()> {
-        self.root = vec![0u8; 32];
-        Ok(())
-    }
-}
-
-/// Concrete App type with default implementations for demonstration.
-pub type DefaultApp = App<NoopUpstream, NoopCommitmentRegistry, NoopProofRegistry>;
-
-impl DefaultApp {
-    /// Initialize App with default/noop components for demonstration.
-    /// In production, this would be replaced with feature-gated concrete implementations.
-    pub fn initialize(config: BaseConfig) -> Result<Self> {
-        // Initialize storage
-        let storage = Storage::open(&config.storage_path)?;
-        info!("Storage opened at: {}", config.storage_path);
-        
-        // Create accumulator factory
-        let accumulator_factory: Arc<dyn Fn() -> Box<dyn Accumulator> + Send + Sync> =
-            Arc::new(|| {
-                Box::new(SimpleAccumulator { root: vec![0u8; 32] })
-            });
-        
-        // Create upstream connector
-        let upstream = NoopUpstream;
-        
-        // Create registries
-        let commitment_registry = NoopCommitmentRegistry;
-        let proof_registry = NoopProofRegistry;
-        
-        Ok(Self::new(
-            upstream,
-            commitment_registry,
-            proof_registry,
-            config,
-            accumulator_factory,
-            storage,
-        ))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,33 +433,11 @@ mod tests {
         assert!(now < u64::MAX);
         
         // Test the App::now_secs function (it's public and associated with App)
-        let app_now = App::<NoopUpstream, NoopCommitmentRegistry, NoopProofRegistry>::now_secs();
+        let app_now = App::now_secs();
         assert!(app_now > 0);
         assert!(app_now < u64::MAX);
         // Should be very close to the previous timestamp
         assert!((app_now as i64 - now as i64).abs() < 2);
-    }
-    
-    // Simple mock implementations for unit testing
-    struct NoopUpstream;
-    impl UpstreamConnector for NoopUpstream {
-        fn name(&self) -> &'static str { "noop" }
-        fn open(&mut self, _tx: crossbeam_channel::Sender<IncomingRecord>) -> Result<()> { Ok(()) }
-        fn close(&mut self) -> Result<()> { Ok(()) }
-    }
-    
-    struct NoopCommitmentRegistry;
-    impl CommitmentRegistry for NoopCommitmentRegistry {
-        fn name(&self) -> &'static str { "noop" }
-        fn commit(&self, _meta: &BatchCommitmentMeta) -> Result<()> { Ok(()) }
-        fn get_prev_commitment(&self, _filter: &CommitmentFilterOptions) -> Result<Option<Commitment>> { Ok(None) }
-    }
-    
-    struct NoopProofRegistry;
-    impl ProofRegistry for NoopProofRegistry {
-        fn name(&self) -> &'static str { "noop" }
-        fn save_proof(&self, _proof: &StoredProof) -> Result<()> { Ok(()) }
-        fn save_proofs(&self, _proofs: &[StoredProof]) -> Result<()> { Ok(()) }
     }
 }
 
