@@ -1,7 +1,7 @@
+use crate::traits::CommitmentRegistry;
+use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
-use crate::traits::CommitmentRegistry;
 
 pub struct CommitmentNoop;
 

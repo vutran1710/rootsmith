@@ -1,7 +1,7 @@
+use crate::traits::CommitmentRegistry;
+use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use anyhow::Result;
 use async_trait::async_trait;
-use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
-use crate::traits::CommitmentRegistry;
 
 /// Mock commitment registry for testing.
 #[derive(Clone)]
@@ -31,8 +31,7 @@ impl CommitmentRegistry for MockCommitmentRegistry {
         self.commitments.lock().unwrap().push(meta.clone());
         println!(
             "MockCommitmentRegistry: committed {} leaves for namespace {:?}",
-            meta.leaf_count,
-            meta.commitment.namespace
+            meta.leaf_count, meta.commitment.namespace
         );
         Ok(())
     }
@@ -42,7 +41,7 @@ impl CommitmentRegistry for MockCommitmentRegistry {
         filter: &CommitmentFilterOptions,
     ) -> Result<Option<Commitment>> {
         let commitments = self.commitments.lock().unwrap();
-        
+
         let result = commitments
             .iter()
             .filter(|m| {

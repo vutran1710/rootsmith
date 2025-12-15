@@ -1,8 +1,8 @@
+use crate::traits::UpstreamConnector;
+use crate::types::IncomingRecord;
 use anyhow::Result;
 use async_trait::async_trait;
 use kanal::AsyncSender;
-use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
 
 pub struct KafkaSource {
     brokers: String,
@@ -11,10 +11,7 @@ pub struct KafkaSource {
 
 impl KafkaSource {
     pub fn new(brokers: String, topic: String) -> Self {
-        Self {
-            brokers,
-            topic,
-        }
+        Self { brokers, topic }
     }
 }
 
@@ -25,7 +22,11 @@ impl UpstreamConnector for KafkaSource {
     }
 
     async fn open(&mut self, _tx: AsyncSender<IncomingRecord>) -> Result<()> {
-        tracing::info!("Opening Kafka connection: {} topic: {}", self.brokers, self.topic);
+        tracing::info!(
+            "Opening Kafka connection: {} topic: {}",
+            self.brokers,
+            self.topic
+        );
         // TODO: Implement actual Kafka connection
         Ok(())
     }

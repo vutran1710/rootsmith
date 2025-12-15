@@ -2,17 +2,19 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::commitment_registry::CommitmentRegistryVariant;
+use crate::config::{AccumulatorType, BaseConfig};
+use crate::crypto::AccumulatorVariant;
+use crate::proof_registry::ProofRegistryVariant;
+use crate::storage::Storage;
+use crate::traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector};
+use crate::types::{
+    BatchCommitmentMeta, Commitment, IncomingRecord, Namespace, StoredProof, Value32,
+};
+use crate::upstream::UpstreamVariant;
 use anyhow::Result;
 use kanal::{unbounded_async, AsyncReceiver};
-use tracing::{info, error, debug, span, Level};
-use crate::storage::Storage;
-use crate::types::{BatchCommitmentMeta, Commitment, IncomingRecord, Namespace, StoredProof, Value32};
-use crate::config::{BaseConfig, AccumulatorType};
-use crate::traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector};
-use crate::upstream::UpstreamVariant;
-use crate::commitment_registry::CommitmentRegistryVariant;
-use crate::proof_registry::ProofRegistryVariant;
-use crate::crypto::AccumulatorVariant;
+use tracing::{debug, error, info, span, Level};
 
 /// Epoch phase for the commit cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -69,7 +71,7 @@ impl RootSmith {
         storage: Storage,
     ) -> Self {
         let now = Self::now_secs();
-        
+
         Self {
             upstream,
             commitment_registry,
@@ -83,18 +85,18 @@ impl RootSmith {
     }
 
     pub fn initialize(config: BaseConfig) -> Result<Self> {
-        use crate::upstream::NoopUpstream;
-        use crate::commitment_registry::CommitmentRegistryVariant;
         use crate::commitment_registry::commitment_noop::CommitmentNoop;
-        use crate::proof_registry::{ProofRegistryVariant, NoopProofRegistry};
+        use crate::commitment_registry::CommitmentRegistryVariant;
+        use crate::proof_registry::{NoopProofRegistry, ProofRegistryVariant};
+        use crate::upstream::NoopUpstream;
 
         let storage = Storage::open(&config.storage_path)?;
         info!("Storage opened at: {}", config.storage_path);
-        
+
         let upstream = UpstreamVariant::Noop(NoopUpstream);
         let commitment_registry = CommitmentRegistryVariant::Noop(CommitmentNoop::new());
         let proof_registry = ProofRegistryVariant::Noop(NoopProofRegistry);
-        
+
         Ok(Self::new(
             upstream,
             commitment_registry,
@@ -107,30 +109,33 @@ impl RootSmith {
     pub async fn run(self) -> Result<()> {
         let span = span!(Level::INFO, "app_run");
         let _enter = span.enter();
-        
-        info!("Starting RootSmith with batch_interval_secs={}", self.config.batch_interval_secs);
-        
+
+        info!(
+            "Starting RootSmith with batch_interval_secs={}",
+            self.config.batch_interval_secs
+        );
+
         let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
-        
+
         info!("Starting upstream connector: {}", self.upstream.name());
-        
+
         let upstream_handle = {
             let async_tx = data_tx.clone();
             let mut upstream = self.upstream;
             tokio::task::spawn(async move {
                 let span = span!(Level::INFO, "upstream_task");
                 let _enter = span.enter();
-                
+
                 if let Err(e) = upstream.open(async_tx).await {
                     error!("Upstream connector failed: {}", e);
                     return Err(e);
                 }
-                
+
                 info!("Upstream connector finished");
                 Ok(())
             })
         };
-        
+
         let process_handle = {
             let storage = Arc::clone(&self.storage);
             let epoch_start_ts = Arc::clone(&self.epoch_start_ts);
@@ -139,11 +144,11 @@ impl RootSmith {
             let commitment_registry = self.commitment_registry;
             let proof_registry = self.proof_registry;
             let config = self.config.clone();
-            
+
             tokio::task::spawn(async move {
                 let span = span!(Level::INFO, "process_and_commit_task");
                 let _enter = span.enter();
-                
+
                 Self::process_and_commit_loop(
                     data_rx,
                     storage,
@@ -153,21 +158,24 @@ impl RootSmith {
                     commitment_registry,
                     proof_registry,
                     config,
-                ).await
+                )
+                .await
             })
         };
-        
-        let upstream_result = upstream_handle.await
+
+        let upstream_result = upstream_handle
+            .await
             .map_err(|_| anyhow::anyhow!("Upstream task panicked"))?;
-        
+
         drop(data_tx);
-        
-        let process_result = process_handle.await
+
+        let process_result = process_handle
+            .await
             .map_err(|_| anyhow::anyhow!("Process task panicked"))?;
-        
+
         upstream_result?;
         process_result?;
-        
+
         info!("RootSmith run completed successfully");
         Ok(())
     }
@@ -189,10 +197,10 @@ impl RootSmith {
                 let elapsed = now.saturating_sub(epoch_start);
                 elapsed >= config.batch_interval_secs
             };
-            
+
             if should_commit {
                 info!("Commit phase starting - DB writes continue freely");
-                
+
                 Self::perform_commit_nonblocking(
                     &storage,
                     &epoch_start_ts,
@@ -201,40 +209,38 @@ impl RootSmith {
                     &commitment_registry,
                     &proof_registry,
                     &config,
-                ).await?;
-                
+                )
+                .await?;
+
                 info!("Commit phase completed - entering pending phase");
-                
+
                 Self::prune_committed_data(&storage, &committed_records)?;
             }
-            
-            match tokio::time::timeout(
-                Duration::from_millis(100),
-                data_rx.recv()
-            ).await {
+
+            match tokio::time::timeout(Duration::from_millis(100), data_rx.recv()).await {
                 Ok(Ok(record)) => {
                     let span = span!(Level::DEBUG, "handle_record", 
                         namespace = ?record.namespace);
                     let _enter = span.enter();
-                    
+
                     let storage_guard = storage.lock().unwrap();
-                    
+
                     {
                         let mut namespaces = active_namespaces.lock().unwrap();
                         namespaces.insert(record.namespace, true);
                     }
-                    
+
                     storage_guard.put(&record)?;
                     debug!("Record stored for namespace {:?}", record.namespace);
                 }
                 Ok(Err(_)) => {
                     info!("Data channel closed, performing final commit if needed");
-                    
+
                     let should_final_commit = {
                         let namespaces = active_namespaces.lock().unwrap();
                         !namespaces.is_empty()
                     };
-                    
+
                     if should_final_commit {
                         Self::perform_commit_nonblocking(
                             &storage,
@@ -244,11 +250,12 @@ impl RootSmith {
                             &commitment_registry,
                             &proof_registry,
                             &config,
-                        ).await?;
-                        
+                        )
+                        .await?;
+
                         Self::prune_committed_data(&storage, &committed_records)?;
                     }
-                    
+
                     break;
                 }
                 Err(_) => {
@@ -256,7 +263,7 @@ impl RootSmith {
                 }
             }
         }
-        
+
         info!("Process and commit loop finished");
         Ok(())
     }
@@ -271,19 +278,19 @@ impl RootSmith {
         config: &BaseConfig,
     ) -> Result<()> {
         info!("Starting commit phase");
-        
+
         let committed_at = {
             let epoch_start = *epoch_start_ts.lock().unwrap();
             epoch_start + config.batch_interval_secs
         };
-        
+
         let namespaces: Vec<Namespace> = {
             let ns = active_namespaces.lock().unwrap();
             ns.keys().copied().collect()
         };
-        
+
         info!("Committing {} namespaces", namespaces.len());
-        
+
         for namespace in namespaces {
             Self::commit_namespace_nonblocking(
                 storage,
@@ -293,9 +300,10 @@ impl RootSmith {
                 commitment_registry,
                 proof_registry,
                 config.accumulator_type,
-            ).await?;
+            )
+            .await?;
         }
-        
+
         {
             let mut epoch_start = epoch_start_ts.lock().unwrap();
             *epoch_start = Self::now_secs();
@@ -304,11 +312,11 @@ impl RootSmith {
             let mut ns = active_namespaces.lock().unwrap();
             ns.clear();
         }
-        
+
         info!("Commit phase completed - downstream pipelines finished");
         Ok(())
     }
-    
+
     fn prune_committed_data(
         storage: &Arc<Mutex<Storage>>,
         committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
@@ -319,20 +327,26 @@ impl RootSmith {
             records.clear();
             to_prune
         };
-        
+
         if records_to_prune.is_empty() {
             return Ok(());
         }
-        
-        info!("Pruning {} committed records from storage", records_to_prune.len());
-        
+
+        info!(
+            "Pruning {} committed records from storage",
+            records_to_prune.len()
+        );
+
         let storage_guard = storage.lock().unwrap();
-        
+
         let mut by_namespace: HashMap<Namespace, Vec<&CommittedRecord>> = HashMap::new();
         for record in &records_to_prune {
-            by_namespace.entry(record.namespace).or_insert_with(Vec::new).push(record);
+            by_namespace
+                .entry(record.namespace)
+                .or_insert_with(Vec::new)
+                .push(record);
         }
-        
+
         for (namespace, records) in by_namespace {
             if let Some(max_ts) = records.iter().map(|r| r.timestamp).max() {
                 let delete_filter = crate::storage::StorageDeleteFilter {
@@ -340,10 +354,14 @@ impl RootSmith {
                     timestamp: max_ts,
                 };
                 storage_guard.delete(&delete_filter)?;
-                debug!("Pruned {} records for namespace {:?}", records.len(), namespace);
+                debug!(
+                    "Pruned {} records for namespace {:?}",
+                    records.len(),
+                    namespace
+                );
             }
         }
-        
+
         info!("Pruning completed");
         Ok(())
     }
@@ -359,22 +377,26 @@ impl RootSmith {
     ) -> Result<()> {
         let (root, record_count, records_to_track) = {
             let storage_guard = storage.lock().unwrap();
-            
+
             let filter = crate::storage::StorageScanFilter {
                 namespace: *namespace,
                 timestamp: Some(committed_at),
             };
             let records = storage_guard.scan(&filter)?;
-            
+
             if records.is_empty() {
                 debug!("No records to commit for namespace {:?}", namespace);
                 return Ok(());
             }
-            
-            info!("Committing {} records for namespace {:?}", records.len(), namespace);
-            
+
+            info!(
+                "Committing {} records for namespace {:?}",
+                records.len(),
+                namespace
+            );
+
             let mut accumulator = AccumulatorVariant::new(accumulator_type);
-            
+
             let mut records_to_track = Vec::new();
             for record in &records {
                 accumulator.put(record.key, record.value)?;
@@ -385,43 +407,43 @@ impl RootSmith {
                     timestamp: record.timestamp,
                 });
             }
-            
+
             let root = accumulator.build_root()?;
             let record_count = records.len();
-            
+
             (root, record_count, records_to_track)
         };
-        
+
         let commitment = Commitment {
             namespace: *namespace,
             root: root.clone(),
             committed_at,
         };
-        
+
         let meta = BatchCommitmentMeta {
             commitment,
             leaf_count: record_count as u64,
         };
-        
+
         commitment_registry.commit(&meta).await?;
-        
+
         let proofs: Vec<StoredProof> = Vec::new();
         if !proofs.is_empty() {
             proof_registry.save_proofs(&proofs).await?;
         }
-        
+
         {
             let mut committed = committed_records.lock().unwrap();
             committed.extend(records_to_track);
         }
-        
+
         info!(
             "Committed namespace {:?}: {} records, root len={} - tracked for pruning",
             namespace,
             record_count,
             root.len()
         );
-        
+
         Ok(())
     }
 
@@ -432,7 +454,6 @@ impl RootSmith {
             .expect("System time is before UNIX_EPOCH - please check your system clock")
             .as_secs()
     }
-
 }
 
 #[cfg(test)]
@@ -447,11 +468,10 @@ mod tests {
             .as_secs();
         assert!(now > 0);
         assert!(now < u64::MAX);
-        
+
         let app_now = RootSmith::now_secs();
         assert!(app_now > 0);
         assert!(app_now < u64::MAX);
         assert!((app_now as i64 - now as i64).abs() < 2);
     }
 }
-

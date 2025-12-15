@@ -1,13 +1,12 @@
-use anyhow::Result;
-use async_trait::async_trait;
-use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
-use crate::traits::CommitmentRegistry;
-use crate::config::CommitmentRegistryType;
 use super::{
-    commitment_contract::CommitmentContract, 
-    commitment_noop::CommitmentNoop,
+    commitment_contract::CommitmentContract, commitment_noop::CommitmentNoop,
     mock::MockCommitmentRegistry,
 };
+use crate::config::CommitmentRegistryType;
+use crate::traits::CommitmentRegistry;
+use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
+use anyhow::Result;
+use async_trait::async_trait;
 
 /// Enum representing all possible commitment registry implementations.
 pub enum CommitmentRegistryVariant {
@@ -20,9 +19,13 @@ impl CommitmentRegistryVariant {
     /// Create a new commitment registry instance based on the specified type.
     pub fn new(registry_type: CommitmentRegistryType) -> Self {
         match registry_type {
-            CommitmentRegistryType::Contract => CommitmentRegistryVariant::Contract(CommitmentContract::new("0x0000000000000000000000000000000000000000".to_string())),
+            CommitmentRegistryType::Contract => CommitmentRegistryVariant::Contract(
+                CommitmentContract::new("0x0000000000000000000000000000000000000000".to_string()),
+            ),
             CommitmentRegistryType::Noop => CommitmentRegistryVariant::Noop(CommitmentNoop::new()),
-            CommitmentRegistryType::Mock => CommitmentRegistryVariant::Mock(MockCommitmentRegistry::new()),
+            CommitmentRegistryType::Mock => {
+                CommitmentRegistryVariant::Mock(MockCommitmentRegistry::new())
+            }
         }
     }
 }
@@ -56,5 +59,3 @@ impl CommitmentRegistry for CommitmentRegistryVariant {
         }
     }
 }
-
-
