@@ -1,6 +1,7 @@
 use super::Leaf;
 use crate::types::{Key32, Value32};
 use anyhow::Result;
+use monotree::Proof;
 
 /// Stateful cryptographic accumulator.
 ///
@@ -38,4 +39,11 @@ pub trait Accumulator: Send + Sync {
 
     /// Flush/reset internal state, preparing for a new batch.
     fn flush(&mut self) -> Result<()>;
+    fn prove(&self, key: &Key32) -> Result<Option<Proof>>;
+    fn verify_proof(
+        &self,
+        root: &[u8; 32],
+        value: &[u8; 32],
+        proof: Option<&monotree::Proof>,
+    ) -> Result<bool>;
 }

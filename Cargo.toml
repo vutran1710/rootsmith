@@ -21,6 +21,7 @@ tokio = { version = "1", features = ["full"] }
 async-trait = "0.1"
 rs_merkle = "1.5.0"
 monotree = "0.4.0"
+hex = "0.4"
 
 # optional future deps:
 # rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
@@ -43,3 +44,5 @@ proof-contract = []
 
 [dev-dependencies]
 tempfile = "3"
+sha2 = "0.10"
+hex = "0.4"
