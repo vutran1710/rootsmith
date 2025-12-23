@@ -1,4 +1,5 @@
 use anyhow::{Ok, Result};
+use rootsmith::crypto::merkle_accumulator::MerkleAccumulator;
 use rootsmith::crypto::sparse_merkle_accumulator::SparseMerkleAccumulator;
 use rootsmith::proof_registry::{proof_to_json, InclusionProofJson, to_0x_hex};
 use rootsmith::traits::Accumulator;
@@ -722,7 +723,175 @@ fn test_accumulator_create_proof() -> Result<()> {
 
     match proof {
         Some(proof) => {
-            println!("proof: {:?}", proof);
+            println!(
+                "\n✓ Proof generated for key {} (first record)",
+                first_key_num
+            );
+            println!("Proof contains {} nodes", proof.nodes.len());
+            for (i, node) in proof.nodes.iter().enumerate() {
+                // hash is Vec<u8> with variable length, safely slice first 8 bytes for display
+                let hash_preview = if node.sibling.len() >= 8 {
+                    &node.sibling[..8]
+                } else {
+                    &node.sibling[..]
+                };
+                println!(
+                    "  Node {}: direction={}, hash={:?} (length={})",
+                    i + 1,
+                    if node.is_left { "left" } else { "right" },
+                    hash_preview,
+                    node.sibling.len()
+                );
+            }
+
+            // Create payload with proof
+            let proof_json = proof_to_json(proof);
+            let payload = InclusionProofJson {
+                root: to_0x_hex(&root),
+                key: to_0x_hex(&first_key),
+                value_hash: to_0x_hex(&value_hash_array),
+                proof: proof_json,
+            };
+
+            // Print payload as JSON
+            println!("\n📄 Inclusion Payload (JSON):");
+            println!("{}", serde_json::to_string_pretty(&payload)?);
+
+            // Verify the proof with JSON payload
+            // Parse hex strings back to bytes
+            let root_hex = payload.root.strip_prefix("0x").unwrap_or(&payload.root);
+            let root_bytes: [u8; 32] = hex::decode(root_hex)?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Root must be 32 bytes"))?;
+
+            let value_hash_hex = payload.value_hash.strip_prefix("0x").unwrap_or(&payload.value_hash);
+            let value_hash_bytes: [u8; 32] = hex::decode(value_hash_hex)?
+                .try_into()
+                .map_err(|_| anyhow::anyhow!("Value hash must be 32 bytes"))?;
+
+            // Reconstruct custom Proof from JSON
+            let proof_nodes: Vec<ProofNode> = payload
+                .proof
+                .into_iter()
+                .map(|node| {
+                    let is_left = node.direction == "left";
+                    let sibling_hex = node.sibling.strip_prefix("0x").unwrap_or(&node.sibling);
+                    let sibling_bytes = hex::decode(sibling_hex)
+                        .map_err(|e| anyhow::anyhow!("Failed to decode sibling hex: {}", e))?;
+                    Ok(ProofNode {
+                        is_left,
+                        sibling: sibling_bytes,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            let reconstructed_proof = Proof {
+                nodes: proof_nodes,
+            };
+
+            // Verify the proof
+            let is_valid = acc.verify_proof(
+                &root_bytes,
+                &value_hash_bytes,
+                Some(&reconstructed_proof),
+            )?;
+
+            if is_valid {
+                println!("\n✅ Proof verification SUCCESSFUL!");
+                println!("   Root: {}", payload.root);
+                println!("   Key: {}", payload.key);
+                println!("   Value Hash: {}", payload.value_hash);
+            } else {
+                println!("\n❌ Proof verification FAILED!");
+            } 
+        }
+        None => {
+            println!(
+                "\n✗ No proof available for key {} (key may not exist)",
+                first_key_num
+            );
+        }
+    }
+
+    Ok(())
+}
+
+#[test]
+fn test_merkle_accumulator_create_proof() -> Result<()> {
+    println!("\n=== Test: Merkle Accumulator Create Proof with JSON Data ===");
+
+    // Read and load kv-data.json
+    let json_path = "tests/data/kv-data.json";
+    let json_content =
+        std::fs::read_to_string(json_path).expect(&format!("Failed to read {}", json_path));
+
+    // Parse JSON
+    let data: serde_json::Value =
+        serde_json::from_str(&json_content).expect("Failed to parse JSON");
+
+    // Print the data
+    let array = data.as_array().expect("Expected JSON array");
+    println!(
+        "\n📦 Loaded {} records from kv-data.json\n",
+        array.len()
+    );
+
+    // Initialize Merkle accumulator
+    let mut acc = MerkleAccumulator::new();
+
+    // Insert each element into the accumulator
+    for (index, element) in array.iter().enumerate() {
+        // Extract key (number) and value (string) from JSON
+        let key_num = element["key"]
+            .as_u64()
+            .expect(&format!("Expected numeric key at index {}", index))
+            as u8;
+        let value_str = element["value"]
+            .as_str()
+            .expect(&format!("Expected string value at index {}", index));
+
+        // Convert key number to [u8; 32] (put number in first byte)
+        let mut key = [0u8; 32];
+        key[0] = key_num;
+
+        // Convert value string to [u8; 32] by hashing with SHA256
+        let mut hasher = Sha256::new();
+        hasher.update(value_str.as_bytes());
+        let value = hasher.finalize();
+        let value_array: [u8; 32] = value.into();
+
+        // Insert into accumulator
+        acc.put(key, value_array)?;
+
+        println!(
+            "Inserted record {}: key={}, value={}",
+            index + 1,
+            key_num,
+            value_str
+        );
+    }
+    let root = acc.build_root()?;
+    println!("Root: {:?}", root);
+
+    // Prove the first key
+    let first_element = array.first().expect("Array should not be empty");
+    let first_key_num = first_element["key"].as_u64().expect("Expected numeric key") as u8;
+
+    let mut first_key = [0u8; 32];
+    first_key[0] = first_key_num;
+
+    // Get the value hash for the first element
+    let first_value_str = first_element["value"]
+        .as_str()
+        .expect("Expected string value");
+    let mut hasher = Sha256::new();
+    hasher.update(first_value_str.as_bytes());
+    let value_hash = hasher.finalize();
+    let value_hash_array: [u8; 32] = value_hash.into();
+
+    let proof = acc.prove(&first_key)?;
+
+    match proof {
+        Some(proof) => {
             println!(
                 "\n✓ Proof generated for key {} (first record)",
                 first_key_num
