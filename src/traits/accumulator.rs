@@ -1,7 +1,6 @@
 use super::Leaf;
-use crate::types::{Key32, Value32};
+use crate::types::{Key32, Proof, Value32};
 use anyhow::Result;
-use monotree::Proof;
 
 /// Stateful cryptographic accumulator.
 ///
@@ -44,6 +43,6 @@ pub trait Accumulator: Send + Sync {
         &self,
         root: &[u8; 32],
         value: &[u8; 32],
-        proof: Option<&monotree::Proof>,
+        proof: Option<&Proof>,
     ) -> Result<bool>;
 }

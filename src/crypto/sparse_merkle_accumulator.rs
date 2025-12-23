@@ -1,11 +1,11 @@
 use crate::traits::Accumulator;
-use crate::types::{Key32, Value32};
+use crate::types::{Key32, Proof, ProofNode, Value32};
 use anyhow::Result;
 use monotree::database::MemoryDB;
 use monotree::hasher::Blake3;
-use monotree::{verify_proof, Hash, Monotree, Proof};
-use std::sync::Mutex;
 use monotree::Hasher;
+use monotree::{verify_proof, Hash, Monotree};
+use std::sync::Mutex;
 
 /// Sparse Merkle tree based accumulator using monotree library.
 pub struct SparseMerkleAccumulator {
@@ -69,10 +69,25 @@ impl Accumulator for SparseMerkleAccumulator {
             return Ok(None);
         }
 
-        let proof = tree
+        let monotree_proof = tree
             .get_merkle_proof(root.as_ref(), &key_hash)
-            .map_err(|e| anyhow::anyhow!("Failed to get proof: {:?}", e))?;
-        Ok(proof)
+            .ok()
+            .flatten();
+
+        match monotree_proof {
+            Some(monotree_proof) => {
+                // Convert monotree::Proof to our custom Proof type
+                let nodes: Vec<ProofNode> = monotree_proof
+                    .into_iter()
+                    .map(|(is_left, sibling)| ProofNode {
+                        is_left,
+                        sibling,
+                    })
+                    .collect();
+                Ok(Some(Proof { nodes }))
+            }
+            None => Ok(None),
+        }
     }
 
     fn verify_proof(
@@ -81,7 +96,7 @@ impl Accumulator for SparseMerkleAccumulator {
         value: &[u8; 32],
         proof: Option<&Proof>,
     ) -> Result<bool> {
-        let hasher = Blake3::new(); // ← giờ import được rồi
+        let hasher = Blake3::new();
         let root_hash = if root.iter().all(|&b| b == 0) {
             None
         } else {
@@ -90,7 +105,20 @@ impl Accumulator for SparseMerkleAccumulator {
 
         let leaf_hash = Hash::from(*value);
 
-        let ok = verify_proof(&hasher, root_hash.as_ref(), &leaf_hash, proof);
+        // Convert our custom Proof to monotree::Proof for verification
+        let monotree_proof = proof.map(|p| {
+            p.nodes
+                .iter()
+                .map(|node| (node.is_left, node.sibling.clone()))
+                .collect()
+        });
+
+        let ok = verify_proof(
+            &hasher,
+            root_hash.as_ref(),
+            &leaf_hash,
+            monotree_proof.as_ref(),
+        );
         Ok(ok)
     }
 

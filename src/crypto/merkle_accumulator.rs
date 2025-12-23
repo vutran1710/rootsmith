@@ -1,7 +1,6 @@
 use crate::traits::Accumulator;
-use crate::types::{Key32, Value32};
+use crate::types::{Key32, Proof, Value32};
 use anyhow::{Ok, Result};
-use monotree::Proof;
 use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree as RsMerkleTree};
 
 /// Merkle tree based accumulator using rs-merkle library.
@@ -97,10 +96,12 @@ impl Accumulator for MerkleAccumulator {
 
     fn verify_proof(
         &self,
-        root: &[u8; 32],
-        value: &[u8; 32],
-        proof: Option<&monotree::Proof>,
+        _root: &[u8; 32],
+        _value: &[u8; 32],
+        _proof: Option<&Proof>,
     ) -> Result<bool> {
+        // Standard Merkle trees do not support proof verification.
+        // This implementation returns false as a safe default.
         Ok(false)
     }
 }

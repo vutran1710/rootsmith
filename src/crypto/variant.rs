@@ -3,9 +3,8 @@ use super::{
 };
 use crate::config::AccumulatorType;
 use crate::traits::Accumulator;
-use crate::types::{Key32, Value32};
+use crate::types::{Key32, Proof, Value32};
 use anyhow::Result;
-use monotree::Proof;
 
 /// Enum representing all possible accumulator implementations.
 pub enum AccumulatorVariant {
@@ -68,19 +67,22 @@ impl Accumulator for AccumulatorVariant {
         }
     }
 
-    fn prove(&self, _key: &Key32) -> Result<Option<Proof>> {
-        // Standard Merkle trees do not support efficient proof generation.
-        // This implementation returns None to indicate proofs are not available.
-        // For proof generation, use SparseMerkleAccumulator instead.
-        Ok(None)
+    fn prove(&self, key: &Key32) -> Result<Option<Proof>> {
+        match self {
+            AccumulatorVariant::Merkle(inner) => inner.prove(key),
+            AccumulatorVariant::SparseMerkle(inner) => inner.prove(key),
+        }
     }
 
     fn verify_proof(
         &self,
         root: &[u8; 32],
         value: &[u8; 32],
-        proof: Option<&monotree::Proof>,
+        proof: Option<&Proof>,
     ) -> Result<bool> {
-        Ok(false)
+        match self {
+            AccumulatorVariant::Merkle(inner) => inner.verify_proof(root, value, proof),
+            AccumulatorVariant::SparseMerkle(inner) => inner.verify_proof(root, value, proof),
+        }
     }
 }

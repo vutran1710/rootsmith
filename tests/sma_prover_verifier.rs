@@ -2,10 +2,10 @@ use anyhow::{Ok, Result};
 use rootsmith::crypto::sparse_merkle_accumulator::SparseMerkleAccumulator;
 use rootsmith::proof_registry::{proof_to_json, InclusionProofJson, to_0x_hex};
 use rootsmith::traits::Accumulator;
+use rootsmith::types::{Proof, ProofNode};
 use serde_json;
 use sha2::{Digest, Sha256};
 use hex;
-use monotree::Proof;
 
 // ===== Test Helper Functions =====
 
@@ -649,8 +649,8 @@ fn test_proof_consistency_across_builds() -> Result<()> {
 fn test_accumulator_create_proof() -> Result<()> {
     println!("\n=== Test: Create Proof with JSON Data ===");
 
-    // Read and load sample-data.json
-    let json_path = "kv-data.json";
+    // Read and load kv-data.json
+    let json_path = "tests/data/kv-data.json";
     let json_content =
         std::fs::read_to_string(json_path).expect(&format!("Failed to read {}", json_path));
 
@@ -661,7 +661,7 @@ fn test_accumulator_create_proof() -> Result<()> {
     // Print the data
     let array = data.as_array().expect("Expected JSON array");
     println!(
-        "\n📦 Loaded {} records from sample-data.json\n",
+        "\n📦 Loaded {} records from kv-data.json\n",
         array.len()
     );
 
@@ -721,31 +721,31 @@ fn test_accumulator_create_proof() -> Result<()> {
     let proof = acc.prove(&first_key)?;
 
     match proof {
-        Some(proof_nodes) => {
-            println!("proof_nodes: {:?}", proof_nodes);
+        Some(proof) => {
+            println!("proof: {:?}", proof);
             println!(
                 "\n✓ Proof generated for key {} (first record)",
                 first_key_num
             );
-            println!("Proof contains {} nodes", proof_nodes.len());
-            for (i, (direction, hash)) in proof_nodes.iter().enumerate() {
+            println!("Proof contains {} nodes", proof.nodes.len());
+            for (i, node) in proof.nodes.iter().enumerate() {
                 // hash is Vec<u8> with variable length, safely slice first 8 bytes for display
-                let hash_preview = if hash.len() >= 8 {
-                    &hash[..8]
+                let hash_preview = if node.sibling.len() >= 8 {
+                    &node.sibling[..8]
                 } else {
-                    &hash[..]
+                    &node.sibling[..]
                 };
                 println!(
                     "  Node {}: direction={}, hash={:?} (length={})",
                     i + 1,
-                    direction,
+                    if node.is_left { "left" } else { "right" },
                     hash_preview,
-                    hash.len()
+                    node.sibling.len()
                 );
             }
 
             // Create payload with proof
-            let proof_json = proof_to_json(proof_nodes);
+            let proof_json = proof_to_json(proof);
             let payload = InclusionProofJson {
                 root: to_0x_hex(&root),
                 key: to_0x_hex(&first_key),
@@ -769,17 +769,24 @@ fn test_accumulator_create_proof() -> Result<()> {
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Value hash must be 32 bytes"))?;
 
-            // Reconstruct monotree Proof from JSON
-            let reconstructed_proof: Proof = payload.proof
+            // Reconstruct custom Proof from JSON
+            let proof_nodes: Vec<ProofNode> = payload
+                .proof
                 .into_iter()
                 .map(|node| {
                     let is_left = node.direction == "left";
                     let sibling_hex = node.sibling.strip_prefix("0x").unwrap_or(&node.sibling);
                     let sibling_bytes = hex::decode(sibling_hex)
                         .map_err(|e| anyhow::anyhow!("Failed to decode sibling hex: {}", e))?;
-                    Ok((is_left, sibling_bytes))
+                    Ok(ProofNode {
+                        is_left,
+                        sibling: sibling_bytes,
+                    })
                 })
                 .collect::<Result<Vec<_>>>()?;
+            let reconstructed_proof = Proof {
+                nodes: proof_nodes,
+            };
 
             // Verify the proof
             let is_valid = acc.verify_proof(
