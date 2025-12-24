@@ -3,7 +3,7 @@ use super::{
 };
 use crate::config::AccumulatorType;
 use crate::traits::Accumulator;
-use crate::types::{Key32, Value32};
+use crate::types::{Key32, Proof, Value32};
 use anyhow::Result;
 
 /// Enum representing all possible accumulator implementations.
@@ -64,6 +64,26 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.flush(),
             AccumulatorVariant::SparseMerkle(inner) => inner.flush(),
+        }
+    }
+
+    fn prove(&self, key: &Key32) -> Result<Option<Proof>> {
+        match self {
+            AccumulatorVariant::Merkle(inner) => inner.prove(key),
+            AccumulatorVariant::SparseMerkle(inner) => inner.prove(key),
+        }
+    }
+
+    fn verify_proof(
+        &self,
+        root: &[u8; 32],
+        key: &Key32,
+        value: &Value32,
+        proof: Option<&Proof>,
+    ) -> Result<bool> {
+        match self {
+            AccumulatorVariant::Merkle(inner) => inner.verify_proof(root, key, value, proof),
+            AccumulatorVariant::SparseMerkle(inner) => inner.verify_proof(root, key, value, proof),
         }
     }
 }

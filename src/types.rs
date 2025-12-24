@@ -44,6 +44,21 @@ pub struct CommitmentFilterOptions {
     pub time: u64,
 }
 
+/// Merkle proof node representing a sibling hash and its direction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProofNode {
+    /// True if sibling is on the left, false if on the right
+    pub is_left: bool,
+    /// Sibling hash value (variable length, typically 32 bytes)
+    pub sibling: Vec<u8>,
+}
+
+/// Merkle proof consisting of a sequence of proof nodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Proof {
+    pub nodes: Vec<ProofNode>,
+}
+
 /// Proof object stored in the proof registry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredProof {

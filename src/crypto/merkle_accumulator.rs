@@ -1,28 +1,29 @@
 use crate::traits::Accumulator;
-use crate::types::{Key32, Value32};
+use crate::types::{Key32, Proof, ProofNode, Value32};
 use anyhow::Result;
 use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree as RsMerkleTree};
+use std::collections::HashMap;
 
-/// Merkle tree based accumulator using rs-merkle library.
 pub struct MerkleAccumulator {
     leaves: Vec<[u8; 32]>,
-    tree: Option<RsMerkleTree<Sha256>>,
+    key_to_index: HashMap<Key32, usize>, // Map keys to leaf indices
 }
 
 impl MerkleAccumulator {
     pub fn new() -> Self {
         Self {
             leaves: Vec::new(),
-            tree: None,
+            key_to_index: HashMap::new(),
         }
     }
 
-    fn rebuild_tree(&mut self) {
-        if self.leaves.is_empty() {
-            self.tree = None;
-        } else {
-            self.tree = Some(RsMerkleTree::<Sha256>::from_leaves(&self.leaves));
-        }
+    #[inline]
+    fn leaf_hash(key: &Key32, value: &Value32) -> [u8; 32] {
+        // Hash both key and value: H( key || value )
+        let mut data = Vec::with_capacity(64);
+        data.extend_from_slice(key);
+        data.extend_from_slice(value);
+        Sha256::hash(&data)
     }
 }
 
@@ -38,14 +39,10 @@ impl Accumulator for MerkleAccumulator {
     }
 
     fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
-        // Combine key and value, then hash
-        let mut data = Vec::with_capacity(64);
-        data.extend_from_slice(&key);
-        data.extend_from_slice(&value);
-        let leaf = Sha256::hash(&data);
+        let leaf = Self::leaf_hash(&key, &value);
+        let index = self.leaves.len();
         self.leaves.push(leaf);
-        // Tree will be rebuilt on next build_root() call
-        self.tree = None;
+        self.key_to_index.insert(key, index);
         Ok(())
     }
 
@@ -53,37 +50,155 @@ impl Accumulator for MerkleAccumulator {
         if self.leaves.is_empty() {
             return Ok(vec![0u8; 32]);
         }
-
-        // Build tree if not already built
+        // Build tree from leaves
         let tree = RsMerkleTree::<Sha256>::from_leaves(&self.leaves);
-
         match tree.root() {
             Some(root) => Ok(root.to_vec()),
             None => Ok(vec![0u8; 32]),
         }
     }
 
-    fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {
-        // Combine key and value to create the leaf we're looking for
-        let mut data = Vec::with_capacity(64);
-        data.extend_from_slice(key);
-        data.extend_from_slice(value);
-        let target_leaf = Sha256::hash(&data);
+    fn flush(&mut self) -> Result<()> {
+        self.leaves.clear();
+        self.key_to_index.clear();
+        Ok(())
+    }
 
-        // Check if this leaf exists in our leaves
-        Ok(self.leaves.contains(&target_leaf))
+    fn prove(&self, key: &Key32) -> Result<Option<Proof>> {
+        // Get index from key
+        let index = match self.key_to_index.get(key).copied() {
+            Some(i) => i,
+            None => return Ok(None),
+        };
+
+        if index >= self.leaves.len() {
+            return Ok(None);
+        }
+
+        let tree = RsMerkleTree::<Sha256>::from_leaves(&self.leaves);
+
+        // Get proof from rs_merkle
+        let merkle_proof = tree.proof(&[index]);
+
+        // rs_merkle trả proof_hashes bottom-up
+        // ta convert sang ProofNode với is_left (sibling nằm bên trái hay không)
+        let mut idx = index;
+        let nodes: Vec<ProofNode> = merkle_proof
+            .proof_hashes()
+            .iter()
+            .map(|sib_hash| {
+                // nếu idx là right-child (idx odd) => sibling nằm LEFT
+                let is_left = (idx % 2) == 1;
+                idx /= 2;
+
+                ProofNode {
+                    is_left,
+                    sibling: sib_hash.to_vec(), // 32 bytes
+                }
+            })
+            .collect();
+
+        Ok(Some(Proof { nodes }))
+    }
+
+    fn prove_many(&self, keys: &[Key32]) -> Result<Vec<(Key32, Option<Proof>)>> {
+        if self.leaves.is_empty() {
+            return Ok(keys.iter().map(|k| (*k, None)).collect());
+        }
+
+        let tree = RsMerkleTree::<Sha256>::from_leaves(&self.leaves);
+
+        let mut out = Vec::with_capacity(keys.len());
+        for k in keys {
+            let Some(&index) = self.key_to_index.get(k) else {
+                out.push((*k, None));
+                continue;
+            };
+            if index >= self.leaves.len() {
+                out.push((*k, None));
+                continue;
+            }
+
+            let merkle_proof = tree.proof(&[index]);
+
+            let mut idx = index;
+            let nodes: Vec<ProofNode> = merkle_proof
+                .proof_hashes()
+                .iter()
+                .map(|sib_hash| {
+                    let is_left = (idx % 2) == 1;
+                    idx /= 2;
+                    ProofNode {
+                        is_left,
+                        sibling: sib_hash.to_vec(),
+                    }
+                })
+                .collect();
+
+            out.push((*k, Some(Proof { nodes })));
+        }
+        Ok(out)
+    }
+
+    fn verify_proof(
+        &self,
+        root: &[u8; 32],
+        key: &Key32,
+        value: &Value32, // raw value
+        proof: Option<&Proof>,
+    ) -> Result<bool> {
+        let Some(proof) = proof else {
+            return Ok(false);
+        };
+
+        // leaf = H(value) (không cần key)
+        let mut cur = Self::leaf_hash(&key, &value);
+
+        for node in &proof.nodes {
+            if node.sibling.len() != 32 {
+                return Ok(false);
+            }
+
+            let mut sib = [0u8; 32];
+            sib.copy_from_slice(&node.sibling);
+
+            let mut buf = [0u8; 64];
+            if node.is_left {
+                // sibling || cur
+                buf[..32].copy_from_slice(&sib);
+                buf[32..].copy_from_slice(&cur);
+            } else {
+                // cur || sibling
+                buf[..32].copy_from_slice(&cur);
+                buf[32..].copy_from_slice(&sib);
+            }
+
+            cur = Sha256::hash(&buf);
+        }
+
+        Ok(&cur == root)
+    }
+
+    fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {
+        if value.len() != 32 {
+            return Ok(false);
+        }
+
+        let idx = match self.key_to_index.get(key).copied() {
+            Some(i) => i,
+            None => return Ok(false),
+        };
+
+        let mut v = [0u8; 32];
+        v.copy_from_slice(value);
+
+        // Reconstruct leaf hash using the same scheme as in put(): H(key || value)
+        let leaf = Self::leaf_hash(key, &v);
+
+        Ok(self.leaves.get(idx) == Some(&leaf))
     }
 
     fn verify_non_inclusion(&self, _key: &Key32) -> Result<bool> {
-        // Note: Standard Merkle trees do not support non-inclusion proofs.
-        // This method returns false as a safe default, indicating we cannot
-        // prove non-inclusion. For proper non-inclusion support, use SparseMerkleAccumulator.
         Ok(false)
-    }
-
-    fn flush(&mut self) -> Result<()> {
-        self.leaves.clear();
-        self.tree = None;
-        Ok(())
     }
 }
