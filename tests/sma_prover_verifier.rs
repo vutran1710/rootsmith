@@ -791,6 +791,7 @@ fn test_accumulator_create_proof() -> Result<()> {
             // Verify the proof
             let is_valid = acc.verify_proof(
                 &root_bytes,
+                &first_key,
                 &value_hash_bytes,
                 Some(&reconstructed_proof),
             )?;
@@ -960,6 +961,7 @@ fn test_merkle_accumulator_create_proof() -> Result<()> {
             // Verify the proof
             let is_valid = acc.verify_proof(
                 &root_bytes,
+                &first_key,
                 &value_hash_bytes,
                 Some(&reconstructed_proof),
             )?;

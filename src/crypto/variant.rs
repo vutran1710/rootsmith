@@ -77,12 +77,13 @@ impl Accumulator for AccumulatorVariant {
     fn verify_proof(
         &self,
         root: &[u8; 32],
-        value: &[u8; 32],
+        key: &Key32,
+        value: &Value32,
         proof: Option<&Proof>,
     ) -> Result<bool> {
         match self {
-            AccumulatorVariant::Merkle(inner) => inner.verify_proof(root, value, proof),
-            AccumulatorVariant::SparseMerkle(inner) => inner.verify_proof(root, value, proof),
+            AccumulatorVariant::Merkle(inner) => inner.verify_proof(root, key, value, proof),
+            AccumulatorVariant::SparseMerkle(inner) => inner.verify_proof(root, key, value, proof),
         }
     }
 }

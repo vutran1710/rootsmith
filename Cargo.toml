@@ -23,6 +23,7 @@ rs_merkle = "1.5.0"
 monotree = "0.4.0"
 hex = "0.4"
 sha2 = "0.10"
+blake3 = "1"
 
 # optional future deps:
 # rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
