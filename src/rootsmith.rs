@@ -505,6 +505,8 @@ impl RootSmith {
             leaf_count: record_count as u64,
         };
 
+        // TODO: Generate and attach proofs for the committed records based on the accumulator root.
+        // For now, proofs are intentionally left empty and may be populated by a later stage.
         let proofs: Vec<StoredProof> = Vec::new();
 
         let result = CommitmentResult {
