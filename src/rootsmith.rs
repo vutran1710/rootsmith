@@ -13,7 +13,7 @@ use crate::types::{
 };
 use crate::upstream::UpstreamVariant;
 use anyhow::Result;
-use kanal::{unbounded_async, AsyncReceiver};
+use kanal::{unbounded_async, AsyncReceiver, AsyncSender};
 use tracing::{debug, error, info, span, Level};
 
 /// Epoch phase for the commit cycle.
@@ -32,6 +32,20 @@ struct CommittedRecord {
     key: [u8; 32],
     value: Value32,
     timestamp: u64,
+}
+
+/// Signal sent from storage writer to committer indicating a namespace has new data.
+#[derive(Debug, Clone, Copy)]
+struct NamespaceUpdate {
+    namespace: Namespace,
+}
+
+/// Commitment result to be delivered by the delivery handler.
+#[derive(Debug, Clone)]
+struct CommitmentResult {
+    meta: BatchCommitmentMeta,
+    proofs: Vec<StoredProof>,
+    committed_records: Vec<CommittedRecord>,
 }
 
 /// Main application orchestrator with epoch-based architecture.
@@ -115,10 +129,18 @@ impl RootSmith {
             self.config.batch_interval_secs
         );
 
+        // Channel 1: Upstream -> Storage Writer
         let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
+        
+        // Channel 2: Storage Writer -> Committer (namespace updates)
+        let (namespace_tx, namespace_rx) = unbounded_async::<NamespaceUpdate>();
+        
+        // Channel 3: Committer -> Delivery Handler (commitment results)
+        let (commit_result_tx, commit_result_rx) = unbounded_async::<CommitmentResult>();
 
         info!("Starting upstream connector: {}", self.upstream.name());
 
+        // Task 1: Upstream pulling
         let upstream_handle = {
             let async_tx = data_tx.clone();
             let mut upstream = self.upstream;
@@ -136,61 +158,145 @@ impl RootSmith {
             })
         };
 
-        let process_handle = {
+        // Task 2: Storage writer
+        let storage_writer_handle = {
+            let storage = Arc::clone(&self.storage);
+            let namespace_tx = namespace_tx.clone();
+            
+            tokio::task::spawn(async move {
+                let span = span!(Level::INFO, "storage_writer_task");
+                let _enter = span.enter();
+
+                Self::storage_writer_loop(data_rx, storage, namespace_tx).await
+            })
+        };
+
+        // Task 3: Periodic committer
+        let committer_handle = {
             let storage = Arc::clone(&self.storage);
             let epoch_start_ts = Arc::clone(&self.epoch_start_ts);
             let active_namespaces = Arc::clone(&self.active_namespaces);
-            let committed_records = Arc::clone(&self.committed_records);
-            let commitment_registry = self.commitment_registry;
-            let proof_registry = self.proof_registry;
             let config = self.config.clone();
-
+            let commit_result_tx_clone = commit_result_tx.clone();
+            
             tokio::task::spawn(async move {
-                let span = span!(Level::INFO, "process_and_commit_task");
+                let span = span!(Level::INFO, "periodic_committer_task");
                 let _enter = span.enter();
 
-                Self::process_and_commit_loop(
-                    data_rx,
+                Self::periodic_committer_loop(
+                    namespace_rx,
                     storage,
                     epoch_start_ts,
                     active_namespaces,
-                    committed_records,
-                    commitment_registry,
-                    proof_registry,
+                    commit_result_tx_clone,
                     config,
                 )
                 .await
             })
         };
 
+        // Task 4: Delivery handler
+        let delivery_handle = {
+            let storage = Arc::clone(&self.storage);
+            let commitment_registry = self.commitment_registry;
+            let proof_registry = self.proof_registry;
+            
+            tokio::task::spawn(async move {
+                let span = span!(Level::INFO, "delivery_handler_task");
+                let _enter = span.enter();
+
+                Self::delivery_handler_loop(
+                    commit_result_rx,
+                    storage,
+                    commitment_registry,
+                    proof_registry,
+                )
+                .await
+            })
+        };
+
+        // Wait for all tasks to complete
         let upstream_result = upstream_handle
             .await
             .map_err(|_| anyhow::anyhow!("Upstream task panicked"))?;
 
         drop(data_tx);
 
-        let process_result = process_handle
+        let storage_writer_result = storage_writer_handle
             .await
-            .map_err(|_| anyhow::anyhow!("Process task panicked"))?;
+            .map_err(|_| anyhow::anyhow!("Storage writer task panicked"))?;
+
+        drop(namespace_tx);
+
+        let committer_result = committer_handle
+            .await
+            .map_err(|_| anyhow::anyhow!("Committer task panicked"))?;
+
+        drop(commit_result_tx);
+
+        let delivery_result = delivery_handle
+            .await
+            .map_err(|_| anyhow::anyhow!("Delivery handler task panicked"))?;
 
         upstream_result?;
-        process_result?;
+        storage_writer_result?;
+        committer_result?;
+        delivery_result?;
 
         info!("RootSmith run completed successfully");
         Ok(())
     }
 
-    async fn process_and_commit_loop(
+    /// Task 2: Storage writer loop - consumes records from upstream and writes to storage
+    async fn storage_writer_loop(
         data_rx: AsyncReceiver<IncomingRecord>,
+        storage: Arc<Mutex<Storage>>,
+        namespace_tx: AsyncSender<NamespaceUpdate>,
+    ) -> Result<()> {
+        loop {
+            match data_rx.recv().await {
+                Ok(record) => {
+                    let span = span!(Level::DEBUG, "handle_record", 
+                        namespace = ?record.namespace);
+                    let _enter = span.enter();
+
+                    {
+                        let storage_guard = storage.lock().unwrap();
+                        storage_guard.put(&record)?;
+                        debug!("Record stored for namespace {:?}", record.namespace);
+                    }
+
+                    // Notify committer about namespace update
+                    let update = NamespaceUpdate {
+                        namespace: record.namespace,
+                    };
+                    if namespace_tx.send(update).await.is_err() {
+                        error!("Failed to send namespace update - committer task may have stopped");
+                        break;
+                    }
+                }
+                Err(_) => {
+                    info!("Data channel closed, storage writer finishing");
+                    break;
+                }
+            }
+        }
+
+        info!("Storage writer loop finished");
+        Ok(())
+    }
+
+    /// Task 3: Periodic committer loop - commits data on interval
+    async fn periodic_committer_loop(
+        namespace_rx: AsyncReceiver<NamespaceUpdate>,
         storage: Arc<Mutex<Storage>>,
         epoch_start_ts: Arc<Mutex<u64>>,
         active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
-        committed_records: Arc<Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: CommitmentRegistryVariant,
-        proof_registry: ProofRegistryVariant,
+        commit_result_tx: AsyncSender<CommitmentResult>,
         config: BaseConfig,
     ) -> Result<()> {
         loop {
+            // Check if it's time to commit
             let should_commit = {
                 let epoch_start = *epoch_start_ts.lock().unwrap();
                 let now = Self::now_secs();
@@ -199,42 +305,58 @@ impl RootSmith {
             };
 
             if should_commit {
-                info!("Commit phase starting - DB writes continue freely");
+                info!("Commit phase starting");
 
-                Self::perform_commit_nonblocking(
-                    &storage,
-                    &epoch_start_ts,
-                    &active_namespaces,
-                    &committed_records,
-                    &commitment_registry,
-                    &proof_registry,
-                    &config,
-                )
-                .await?;
+                let committed_at = {
+                    let epoch_start = *epoch_start_ts.lock().unwrap();
+                    epoch_start + config.batch_interval_secs
+                };
 
-                info!("Commit phase completed - entering pending phase");
+                let namespaces: Vec<Namespace> = {
+                    let ns = active_namespaces.lock().unwrap();
+                    ns.keys().copied().collect()
+                };
 
-                Self::prune_committed_data(&storage, &committed_records)?;
+                info!("Committing {} namespaces", namespaces.len());
+
+                for namespace in namespaces {
+                    if let Some(result) = Self::commit_namespace(
+                        &storage,
+                        &namespace,
+                        committed_at,
+                        config.accumulator_type,
+                    )
+                    .await?
+                    {
+                        // Send result to delivery handler
+                        if commit_result_tx.send(result).await.is_err() {
+                            error!("Failed to send commit result - delivery handler may have stopped");
+                        }
+                    }
+                }
+
+                // Reset epoch
+                {
+                    let mut epoch_start = epoch_start_ts.lock().unwrap();
+                    *epoch_start = Self::now_secs();
+                }
+                {
+                    let mut ns = active_namespaces.lock().unwrap();
+                    ns.clear();
+                }
+
+                info!("Commit phase completed");
             }
 
-            match tokio::time::timeout(Duration::from_millis(100), data_rx.recv()).await {
-                Ok(Ok(record)) => {
-                    let span = span!(Level::DEBUG, "handle_record", 
-                        namespace = ?record.namespace);
-                    let _enter = span.enter();
-
-                    let storage_guard = storage.lock().unwrap();
-
-                    {
-                        let mut namespaces = active_namespaces.lock().unwrap();
-                        namespaces.insert(record.namespace, true);
-                    }
-
-                    storage_guard.put(&record)?;
-                    debug!("Record stored for namespace {:?}", record.namespace);
+            // Process namespace updates or timeout
+            match tokio::time::timeout(Duration::from_millis(100), namespace_rx.recv()).await {
+                Ok(Ok(update)) => {
+                    let mut namespaces = active_namespaces.lock().unwrap();
+                    namespaces.insert(update.namespace, true);
+                    debug!("Namespace {:?} marked as active", update.namespace);
                 }
                 Ok(Err(_)) => {
-                    info!("Data channel closed, performing final commit if needed");
+                    info!("Namespace channel closed, performing final commit if needed");
 
                     let should_final_commit = {
                         let namespaces = active_namespaces.lock().unwrap();
@@ -242,139 +364,92 @@ impl RootSmith {
                     };
 
                     if should_final_commit {
-                        Self::perform_commit_nonblocking(
-                            &storage,
-                            &epoch_start_ts,
-                            &active_namespaces,
-                            &committed_records,
-                            &commitment_registry,
-                            &proof_registry,
-                            &config,
-                        )
-                        .await?;
+                        let committed_at = Self::now_secs();
 
-                        Self::prune_committed_data(&storage, &committed_records)?;
+                        let namespaces: Vec<Namespace> = {
+                            let ns = active_namespaces.lock().unwrap();
+                            ns.keys().copied().collect()
+                        };
+
+                        for namespace in namespaces {
+                            if let Some(result) = Self::commit_namespace(
+                                &storage,
+                                &namespace,
+                                committed_at,
+                                config.accumulator_type,
+                            )
+                            .await?
+                            {
+                                if commit_result_tx.send(result).await.is_err() {
+                                    error!("Failed to send final commit result");
+                                }
+                            }
+                        }
                     }
 
                     break;
                 }
                 Err(_) => {
+                    // Timeout, continue checking for commit
                     continue;
                 }
             }
         }
 
-        info!("Process and commit loop finished");
+        info!("Periodic committer loop finished");
         Ok(())
     }
 
-    async fn perform_commit_nonblocking(
-        storage: &Arc<Mutex<Storage>>,
-        epoch_start_ts: &Arc<Mutex<u64>>,
-        active_namespaces: &Arc<Mutex<HashMap<Namespace, bool>>>,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: &CommitmentRegistryVariant,
-        proof_registry: &ProofRegistryVariant,
-        config: &BaseConfig,
+    /// Task 4: Delivery handler loop - handles commitment and proof delivery
+    async fn delivery_handler_loop(
+        commit_result_rx: AsyncReceiver<CommitmentResult>,
+        storage: Arc<Mutex<Storage>>,
+        commitment_registry: CommitmentRegistryVariant,
+        proof_registry: ProofRegistryVariant,
     ) -> Result<()> {
-        info!("Starting commit phase");
+        loop {
+            match commit_result_rx.recv().await {
+                Ok(result) => {
+                    let span = span!(Level::DEBUG, "deliver_commitment", 
+                        namespace = ?result.meta.commitment.namespace);
+                    let _enter = span.enter();
 
-        let committed_at = {
-            let epoch_start = *epoch_start_ts.lock().unwrap();
-            epoch_start + config.batch_interval_secs
-        };
+                    // Deliver commitment
+                    commitment_registry.commit(&result.meta).await?;
+                    info!(
+                        "Delivered commitment for namespace {:?}: {} records",
+                        result.meta.commitment.namespace, result.meta.leaf_count
+                    );
 
-        let namespaces: Vec<Namespace> = {
-            let ns = active_namespaces.lock().unwrap();
-            ns.keys().copied().collect()
-        };
+                    // Deliver proofs if any
+                    if !result.proofs.is_empty() {
+                        proof_registry.save_proofs(&result.proofs).await?;
+                        debug!("Delivered {} proofs", result.proofs.len());
+                    }
 
-        info!("Committing {} namespaces", namespaces.len());
-
-        for namespace in namespaces {
-            Self::commit_namespace_nonblocking(
-                storage,
-                &namespace,
-                committed_at,
-                committed_records,
-                commitment_registry,
-                proof_registry,
-                config.accumulator_type,
-            )
-            .await?;
-        }
-
-        {
-            let mut epoch_start = epoch_start_ts.lock().unwrap();
-            *epoch_start = Self::now_secs();
-        }
-        {
-            let mut ns = active_namespaces.lock().unwrap();
-            ns.clear();
-        }
-
-        info!("Commit phase completed - downstream pipelines finished");
-        Ok(())
-    }
-
-    fn prune_committed_data(
-        storage: &Arc<Mutex<Storage>>,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
-    ) -> Result<()> {
-        let records_to_prune = {
-            let mut records = committed_records.lock().unwrap();
-            let to_prune = records.clone();
-            records.clear();
-            to_prune
-        };
-
-        if records_to_prune.is_empty() {
-            return Ok(());
-        }
-
-        info!(
-            "Pruning {} committed records from storage",
-            records_to_prune.len()
-        );
-
-        let storage_guard = storage.lock().unwrap();
-
-        let mut by_namespace: HashMap<Namespace, Vec<&CommittedRecord>> = HashMap::new();
-        for record in &records_to_prune {
-            by_namespace
-                .entry(record.namespace)
-                .or_insert_with(Vec::new)
-                .push(record);
-        }
-
-        for (namespace, records) in by_namespace {
-            if let Some(max_ts) = records.iter().map(|r| r.timestamp).max() {
-                let delete_filter = crate::storage::StorageDeleteFilter {
-                    namespace,
-                    timestamp: max_ts,
-                };
-                storage_guard.delete(&delete_filter)?;
-                debug!(
-                    "Pruned {} records for namespace {:?}",
-                    records.len(),
-                    namespace
-                );
+                    // Prune committed data
+                    if !result.committed_records.is_empty() {
+                        Self::prune_records(&storage, &result.committed_records)?;
+                    }
+                }
+                Err(_) => {
+                    info!("Commit result channel closed, delivery handler finishing");
+                    break;
+                }
             }
         }
 
-        info!("Pruning completed");
+        info!("Delivery handler loop finished");
         Ok(())
     }
 
-    async fn commit_namespace_nonblocking(
+    /// Commit a single namespace and return the result
+    async fn commit_namespace(
         storage: &Arc<Mutex<Storage>>,
         namespace: &Namespace,
         committed_at: u64,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: &CommitmentRegistryVariant,
-        proof_registry: &ProofRegistryVariant,
         accumulator_type: AccumulatorType,
-    ) -> Result<()> {
+    ) -> Result<Option<CommitmentResult>> {
         let (root, record_count, records_to_track) = {
             let storage_guard = storage.lock().unwrap();
 
@@ -386,11 +461,11 @@ impl RootSmith {
 
             if records.is_empty() {
                 debug!("No records to commit for namespace {:?}", namespace);
-                return Ok(());
+                return Ok(None);
             }
 
             info!(
-                "Committing {} records for namespace {:?}",
+                "Preparing commit for {} records in namespace {:?}",
                 records.len(),
                 namespace
             );
@@ -425,25 +500,61 @@ impl RootSmith {
             leaf_count: record_count as u64,
         };
 
-        commitment_registry.commit(&meta).await?;
-
         let proofs: Vec<StoredProof> = Vec::new();
-        if !proofs.is_empty() {
-            proof_registry.save_proofs(&proofs).await?;
-        }
 
-        {
-            let mut committed = committed_records.lock().unwrap();
-            committed.extend(records_to_track);
-        }
+        let result = CommitmentResult {
+            meta,
+            proofs,
+            committed_records: records_to_track,
+        };
 
         info!(
-            "Committed namespace {:?}: {} records, root len={} - tracked for pruning",
+            "Namespace {:?} commit prepared: {} records, root len={}",
             namespace,
             record_count,
             root.len()
         );
 
+        Ok(Some(result))
+    }
+
+    /// Prune committed records from storage
+    fn prune_records(
+        storage: &Arc<Mutex<Storage>>,
+        records: &[CommittedRecord],
+    ) -> Result<()> {
+        if records.is_empty() {
+            return Ok(());
+        }
+
+        info!("Pruning {} committed records from storage", records.len());
+
+        let storage_guard = storage.lock().unwrap();
+
+        let mut by_namespace: HashMap<Namespace, Vec<&CommittedRecord>> = HashMap::new();
+        for record in records {
+            by_namespace
+                .entry(record.namespace)
+                .or_insert_with(Vec::new)
+                .push(record);
+        }
+
+        for (namespace, records) in by_namespace {
+            if let Some(max_ts) = records.iter().map(|r| r.timestamp).max() {
+                let delete_filter = crate::storage::StorageDeleteFilter {
+                    namespace,
+                    timestamp: max_ts,
+                };
+                storage_guard.delete(&delete_filter)?;
+                debug!(
+                    "Pruned {} records for namespace {:?}",
+                    records.len(),
+                    namespace
+                );
+            }
+        }
+
+        info!("Pruning completed");
         Ok(())
     }
 
