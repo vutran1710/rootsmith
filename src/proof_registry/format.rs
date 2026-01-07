@@ -1,6 +1,6 @@
-use anyhow::Result;
 use crate::proof_registry::types::ProofNodeJson;
 use crate::types::Proof;
+use anyhow::Result;
 
 pub fn to_0x_hex(bytes: &[u8]) -> String {
     let mut s = String::from("0x");

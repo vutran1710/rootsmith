@@ -84,7 +84,7 @@ impl RootSmith {
         }
     }
 
-    pub fn initialize(config: BaseConfig) -> Result<Self> {
+    pub async fn initialize(config: BaseConfig) -> Result<Self> {
         use crate::commitment_registry::commitment_noop::CommitmentNoop;
         use crate::commitment_registry::CommitmentRegistryVariant;
         use crate::proof_registry::{NoopProofRegistry, ProofRegistryVariant};
@@ -117,67 +117,70 @@ impl RootSmith {
 
         let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
 
-        info!("Starting upstream connector: {}", self.upstream.name());
-
-        let upstream_handle = {
-            let async_tx = data_tx.clone();
-            let mut upstream = self.upstream;
-            tokio::task::spawn(async move {
-                let span = span!(Level::INFO, "upstream_task");
-                let _enter = span.enter();
-
-                if let Err(e) = upstream.open(async_tx).await {
-                    error!("Upstream connector failed: {}", e);
-                    return Err(e);
-                }
-
-                info!("Upstream connector finished");
-                Ok(())
-            })
+        let handle_upstream_task = {
+            info!("Starting upstream connector: {}", self.upstream.name());
+            // TODO: Handle upstream errors and shutdown signals properly
         };
 
-        let process_handle = {
-            let storage = Arc::clone(&self.storage);
-            let epoch_start_ts = Arc::clone(&self.epoch_start_ts);
-            let active_namespaces = Arc::clone(&self.active_namespaces);
-            let committed_records = Arc::clone(&self.committed_records);
-            let commitment_registry = self.commitment_registry;
-            let proof_registry = self.proof_registry;
-            let config = self.config.clone();
-
-            tokio::task::spawn(async move {
-                let span = span!(Level::INFO, "process_and_commit_task");
-                let _enter = span.enter();
-
-                Self::process_and_commit_loop(
-                    data_rx,
-                    storage,
-                    epoch_start_ts,
-                    active_namespaces,
-                    committed_records,
-                    commitment_registry,
-                    proof_registry,
-                    config,
-                )
-                .await
-            })
+        let storage_write_task = async move {
+            info!("Starting storage write loop");
+            // Consume data from upstream and write to storage
+            // Probably do some observation/logging here as well
         };
 
-        let upstream_result = upstream_handle
-            .await
-            .map_err(|_| anyhow::anyhow!("Upstream task panicked"))?;
+        let commit_task = async move {
+            info!("Starting commit loop");
+            // TODO: listening on go-ahead signals to produce commitments
+        };
 
-        drop(data_tx);
+        let proof_registry_task = async move {
+            info!("Starting proof registry loop");
+            // TODO: listen for new commitments and generate proofs
+            // store proofs in proof registry
+        };
 
-        let process_result = process_handle
-            .await
-            .map_err(|_| anyhow::anyhow!("Process task panicked"))?;
+        let proof_delivery_task = async move {
+            info!("Starting proof delivery loop");
+            // TODO: receive proofs and deliver them
+        };
 
-        upstream_result?;
-        process_result?;
+        let db_prune_task = async move {
+            info!("Starting database pruning loop");
+            // TODO: prune committed data from storage
+        };
 
-        info!("RootSmith run completed successfully");
-        Ok(())
+        let archiving_task = async move {
+            info!("Starting archiving task");
+            // TODO: archive old data to cold storage
+        };
+
+        let query_layer_task = async move {
+            info!("Starting storage query interface");
+            // TODO: process to handle data queries
+        };
+
+        let metrics_layer_task = async move {
+            info!("Starting metrics query interface");
+            // TODO: process to query metrics
+        };
+
+        let admin_server_task = async move {
+            info!("Starting admin server");
+            // TODO: process to handle admin requests (query, metrics, health, etc)
+        };
+
+        tokio::join!(
+            handle_upstream_task,
+            storage_write_task,
+            commit_task,
+            proof_registry_task,
+            proof_delivery_task,
+            db_prune_task,
+            archiving_task,
+            query_layer_task,
+            metrics_layer_task,
+            admin_server_task,
+        )?
     }
 
     async fn process_and_commit_loop(
@@ -219,7 +222,7 @@ impl RootSmith {
 
             match tokio::time::timeout(Duration::from_millis(100), data_rx.recv()).await {
                 Ok(Ok(record)) => {
-                    let span = span!(Level::DEBUG, "handle_record", 
+                    let span = span!(Level::DEBUG, "handle_record",
                         namespace = ?record.namespace);
                     let _enter = span.enter();
 

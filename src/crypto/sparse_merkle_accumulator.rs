@@ -33,7 +33,7 @@ impl SparseMerkleAccumulator {
         arr.copy_from_slice(out.as_bytes());
         Hash::from(arr)
     }
-    
+
     #[inline]
     fn key_bit_msb(key: &Key32, depth: usize) -> bool {
         let byte = key[depth / 8];

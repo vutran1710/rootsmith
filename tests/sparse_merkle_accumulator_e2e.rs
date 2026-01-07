@@ -119,10 +119,7 @@ async fn test_sparse_merkle_e2e_basic_flow() -> Result<()> {
     let commitments = commitment_registry_clone.get_commitments();
     println!("Total commitments: {}", commitments.len());
 
-    assert!(
-        !commitments.is_empty(),
-        "Expected at least 1 commitment"
-    );
+    assert!(!commitments.is_empty(), "Expected at least 1 commitment");
 
     // Verify namespace commitment
     let ns1_commitments: Vec<_> = commitments
@@ -328,14 +325,13 @@ async fn test_sparse_merkle_non_inclusion_proofs() -> Result<()> {
 
     for key in non_inserted_keys.iter() {
         let is_non_included = acc.verify_non_inclusion(key)?;
-        assert!(
-            is_non_included,
-            "Key {:?} should not be included",
-            key
-        );
+        assert!(is_non_included, "Key {:?} should not be included", key);
     }
 
-    println!("✓ Non-inclusion verified for {} keys", non_inserted_keys.len());
+    println!(
+        "✓ Non-inclusion verified for {} keys",
+        non_inserted_keys.len()
+    );
 
     // Test that inserted keys CANNOT pass non-inclusion check
     for key in keys_inserted.iter() {
@@ -420,10 +416,7 @@ async fn test_sparse_merkle_large_sparse_dataset() -> Result<()> {
 
     // Verify results
     let commitments = commitment_registry_clone.get_commitments();
-    assert!(
-        !commitments.is_empty(),
-        "Expected at least 1 commitment"
-    );
+    assert!(!commitments.is_empty(), "Expected at least 1 commitment");
 
     let ns1_commitments: Vec<_> = commitments
         .iter()
@@ -495,7 +488,10 @@ async fn test_sparse_merkle_multiple_namespaces() -> Result<()> {
         });
     }
 
-    println!("Created {} test records across 3 namespaces", test_records.len());
+    println!(
+        "Created {} test records across 3 namespaces",
+        test_records.len()
+    );
 
     let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
     let commitment_registry = MockCommitmentRegistry::new();

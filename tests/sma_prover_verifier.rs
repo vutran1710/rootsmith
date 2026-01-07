@@ -1,12 +1,12 @@
 use anyhow::{Ok, Result};
+use hex;
 use rootsmith::crypto::merkle_accumulator::MerkleAccumulator;
 use rootsmith::crypto::sparse_merkle_accumulator::SparseMerkleAccumulator;
-use rootsmith::proof_registry::{proof_to_json, InclusionProofJson, to_0x_hex};
+use rootsmith::proof_registry::{proof_to_json, to_0x_hex, InclusionProofJson};
 use rootsmith::traits::Accumulator;
 use rootsmith::types::{Proof, ProofNode};
 use serde_json;
 use sha2::{Digest, Sha256};
-use hex;
 
 // ===== Test Helper Functions =====
 
@@ -661,10 +661,7 @@ fn test_accumulator_create_proof() -> Result<()> {
 
     // Print the data
     let array = data.as_array().expect("Expected JSON array");
-    println!(
-        "\n📦 Loaded {} records from kv-data.json\n",
-        array.len()
-    );
+    println!("\n📦 Loaded {} records from kv-data.json\n", array.len());
 
     // Initialize accumulator
     let mut acc = SparseMerkleAccumulator::new();
@@ -764,7 +761,10 @@ fn test_accumulator_create_proof() -> Result<()> {
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Root must be 32 bytes"))?;
 
-            let value_hash_hex = payload.value_hash.strip_prefix("0x").unwrap_or(&payload.value_hash);
+            let value_hash_hex = payload
+                .value_hash
+                .strip_prefix("0x")
+                .unwrap_or(&payload.value_hash);
             let value_hash_bytes: [u8; 32] = hex::decode(value_hash_hex)?
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Value hash must be 32 bytes"))?;
@@ -784,9 +784,7 @@ fn test_accumulator_create_proof() -> Result<()> {
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let reconstructed_proof = Proof {
-                nodes: proof_nodes,
-            };
+            let reconstructed_proof = Proof { nodes: proof_nodes };
 
             // Verify the proof
             let is_valid = acc.verify_proof(
@@ -803,7 +801,7 @@ fn test_accumulator_create_proof() -> Result<()> {
                 println!("   Value Hash: {}", payload.value_hash);
             } else {
                 println!("\n❌ Proof verification FAILED!");
-            } 
+            }
         }
         None => {
             println!(
@@ -831,10 +829,7 @@ fn test_merkle_accumulator_create_proof() -> Result<()> {
 
     // Print the data
     let array = data.as_array().expect("Expected JSON array");
-    println!(
-        "\n📦 Loaded {} records from kv-data.json\n",
-        array.len()
-    );
+    println!("\n📦 Loaded {} records from kv-data.json\n", array.len());
 
     // Initialize Merkle accumulator
     let mut acc = MerkleAccumulator::new();
@@ -934,7 +929,10 @@ fn test_merkle_accumulator_create_proof() -> Result<()> {
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Root must be 32 bytes"))?;
 
-            let value_hash_hex = payload.value_hash.strip_prefix("0x").unwrap_or(&payload.value_hash);
+            let value_hash_hex = payload
+                .value_hash
+                .strip_prefix("0x")
+                .unwrap_or(&payload.value_hash);
             let value_hash_bytes: [u8; 32] = hex::decode(value_hash_hex)?
                 .try_into()
                 .map_err(|_| anyhow::anyhow!("Value hash must be 32 bytes"))?;
@@ -954,9 +952,7 @@ fn test_merkle_accumulator_create_proof() -> Result<()> {
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
-            let reconstructed_proof = Proof {
-                nodes: proof_nodes,
-            };
+            let reconstructed_proof = Proof { nodes: proof_nodes };
 
             // Verify the proof
             let is_valid = acc.verify_proof(
@@ -973,7 +969,7 @@ fn test_merkle_accumulator_create_proof() -> Result<()> {
                 println!("   Value Hash: {}", payload.value_hash);
             } else {
                 println!("\n❌ Proof verification FAILED!");
-            } 
+            }
         }
         None => {
             println!(

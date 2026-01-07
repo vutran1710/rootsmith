@@ -3,8 +3,8 @@ use serde::Serialize;
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProofNodeJson {
-    pub direction: String,   // "left" | "right"
-    pub sibling: String,     // 0x...
+    pub direction: String, // "left" | "right"
+    pub sibling: String,   // 0x...
 }
 
 #[derive(Serialize)]
