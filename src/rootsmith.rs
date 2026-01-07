@@ -70,9 +70,6 @@ pub struct RootSmith {
 
     /// Track active namespaces for efficient commit.
     active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
-
-    /// Track committed records for pruning in pending phase.
-    committed_records: Arc<Mutex<Vec<CommittedRecord>>>,
 }
 
 impl RootSmith {
@@ -94,7 +91,6 @@ impl RootSmith {
             storage: Arc::new(Mutex::new(storage)),
             epoch_start_ts: Arc::new(Mutex::new(now)),
             active_namespaces: Arc::new(Mutex::new(HashMap::new())),
-            committed_records: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -271,7 +267,10 @@ impl RootSmith {
                         namespace: record.namespace,
                     };
                     if namespace_tx.send(update).await.is_err() {
-                        error!("Failed to send namespace update - committer task may have stopped");
+                        error!(
+                            "Failed to send namespace update - committer task has stopped. \
+                            Stopping storage writer to prevent unbounded storage growth."
+                        );
                         break;
                     }
                 }
@@ -330,7 +329,10 @@ impl RootSmith {
                     {
                         // Send result to delivery handler
                         if commit_result_tx.send(result).await.is_err() {
-                            error!("Failed to send commit result - delivery handler may have stopped");
+                            return Err(anyhow::anyhow!(
+                                "Delivery handler has stopped - cannot deliver commitments. \
+                                Stopping committer to prevent data loss."
+                            ));
                         }
                     }
                 }
@@ -381,7 +383,10 @@ impl RootSmith {
                             .await?
                             {
                                 if commit_result_tx.send(result).await.is_err() {
-                                    error!("Failed to send final commit result");
+                                    return Err(anyhow::anyhow!(
+                                        "Delivery handler has stopped - cannot deliver final commitments. \
+                                        Data loss prevented by failing."
+                                    ));
                                 }
                             }
                         }
