@@ -81,9 +81,6 @@ pub struct RootSmith {
 
     /// Track active namespaces for efficient commit.
     active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
-
-    /// Track committed records for pruning in pending phase.
-    committed_records: Arc<Mutex<Vec<CommittedRecord>>>,
 }
 
 impl RootSmith {
@@ -105,7 +102,6 @@ impl RootSmith {
             storage: Arc::new(Mutex::new(storage)),
             epoch_start_ts: Arc::new(Mutex::new(now)),
             active_namespaces: Arc::new(Mutex::new(HashMap::new())),
-            committed_records: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -405,94 +401,6 @@ impl RootSmith {
         Ok(())
     }
 
-    async fn process_and_commit_loop(
-        data_rx: AsyncReceiver<IncomingRecord>,
-        storage: Arc<Mutex<Storage>>,
-        epoch_start_ts: Arc<Mutex<u64>>,
-        active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
-        committed_records: Arc<Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: CommitmentRegistryVariant,
-        proof_registry: ProofRegistryVariant,
-        config: BaseConfig,
-    ) -> Result<()> {
-        loop {
-            let should_commit = {
-                let epoch_start = *epoch_start_ts.lock().unwrap();
-                let now = Self::now_secs();
-                let elapsed = now.saturating_sub(epoch_start);
-                elapsed >= config.batch_interval_secs
-            };
-
-            if should_commit {
-                info!("Commit phase starting - DB writes continue freely");
-
-                Self::perform_commit_nonblocking(
-                    &storage,
-                    &epoch_start_ts,
-                    &active_namespaces,
-                    &committed_records,
-                    &commitment_registry,
-                    &proof_registry,
-                    &config,
-                )
-                .await?;
-
-                info!("Commit phase completed - entering pending phase");
-
-                Self::prune_committed_data(&storage, &committed_records)?;
-            }
-
-            match tokio::time::timeout(Duration::from_millis(100), data_rx.recv()).await {
-                Ok(Ok(record)) => {
-                    let span = span!(Level::DEBUG, "handle_record", 
-                        namespace = ?record.namespace);
-                    let _enter = span.enter();
-
-                    let storage_guard = storage.lock().unwrap();
-
-                    {
-                        let mut namespaces = active_namespaces.lock().unwrap();
-                        namespaces.insert(record.namespace, true);
-                    }
-
-                    storage_guard.put(&record)?;
-                    debug!("Record stored for namespace {:?}", record.namespace);
-                }
-                Ok(Err(_)) => {
-                    info!("Data channel closed, performing final commit if needed");
-
-                    let should_final_commit = {
-                        let namespaces = active_namespaces.lock().unwrap();
-                        !namespaces.is_empty()
-                    };
-
-                    if should_final_commit {
-                        Self::perform_commit_nonblocking(
-                            &storage,
-                            &epoch_start_ts,
-                            &active_namespaces,
-                            &committed_records,
-                            &commitment_registry,
-                            &proof_registry,
-                            &config,
-                        )
-                        .await?;
-
-                        Self::prune_committed_data(&storage, &committed_records)?;
-                    }
-
-                    break;
-                }
-                Err(_) => {
-                    continue;
-                }
-            }
-        }
-
-        info!("Process and commit loop finished");
-        Ok(())
-    }
-
     /// Helper method to spawn a task with graceful shutdown support.
     fn spawn_with_shutdown<T, R, F, Fut>(
         _task_name: &'static str,
@@ -780,185 +688,6 @@ impl RootSmith {
         Ok(())
     }
 
-    async fn perform_commit_nonblocking(
-        storage: &Arc<Mutex<Storage>>,
-        epoch_start_ts: &Arc<Mutex<u64>>,
-        active_namespaces: &Arc<Mutex<HashMap<Namespace, bool>>>,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: &CommitmentRegistryVariant,
-        proof_registry: &ProofRegistryVariant,
-        config: &BaseConfig,
-    ) -> Result<()> {
-        info!("Starting commit phase");
-
-        let committed_at = {
-            let epoch_start = *epoch_start_ts.lock().unwrap();
-            epoch_start + config.batch_interval_secs
-        };
-
-        let namespaces: Vec<Namespace> = {
-            let ns = active_namespaces.lock().unwrap();
-            ns.keys().copied().collect()
-        };
-
-        info!("Committing {} namespaces", namespaces.len());
-
-        for namespace in namespaces {
-            Self::commit_namespace_nonblocking(
-                storage,
-                &namespace,
-                committed_at,
-                committed_records,
-                commitment_registry,
-                proof_registry,
-                config.accumulator_type,
-            )
-            .await?;
-        }
-
-        {
-            let mut epoch_start = epoch_start_ts.lock().unwrap();
-            *epoch_start = Self::now_secs();
-        }
-        {
-            let mut ns = active_namespaces.lock().unwrap();
-            ns.clear();
-        }
-
-        info!("Commit phase completed - downstream pipelines finished");
-        Ok(())
-    }
-
-    fn prune_committed_data(
-        storage: &Arc<Mutex<Storage>>,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
-    ) -> Result<()> {
-        let records_to_prune = {
-            let mut records = committed_records.lock().unwrap();
-            let to_prune = records.clone();
-            records.clear();
-            to_prune
-        };
-
-        if records_to_prune.is_empty() {
-            return Ok(());
-        }
-
-        info!(
-            "Pruning {} committed records from storage",
-            records_to_prune.len()
-        );
-
-        let storage_guard = storage.lock().unwrap();
-
-        let mut by_namespace: HashMap<Namespace, Vec<&CommittedRecord>> = HashMap::new();
-        for record in &records_to_prune {
-            by_namespace
-                .entry(record.namespace)
-                .or_insert_with(Vec::new)
-                .push(record);
-        }
-
-        for (namespace, records) in by_namespace {
-            if let Some(max_ts) = records.iter().map(|r| r.timestamp).max() {
-                let delete_filter = crate::storage::StorageDeleteFilter {
-                    namespace,
-                    timestamp: max_ts,
-                };
-                storage_guard.delete(&delete_filter)?;
-                debug!(
-                    "Pruned {} records for namespace {:?}",
-                    records.len(),
-                    namespace
-                );
-            }
-        }
-
-        info!("Pruning completed");
-        Ok(())
-    }
-
-    async fn commit_namespace_nonblocking(
-        storage: &Arc<Mutex<Storage>>,
-        namespace: &Namespace,
-        committed_at: u64,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: &CommitmentRegistryVariant,
-        proof_registry: &ProofRegistryVariant,
-        accumulator_type: AccumulatorType,
-    ) -> Result<()> {
-        let (root, record_count, records_to_track) = {
-            let storage_guard = storage.lock().unwrap();
-
-            let filter = crate::storage::StorageScanFilter {
-                namespace: *namespace,
-                timestamp: Some(committed_at),
-            };
-            let records = storage_guard.scan(&filter)?;
-
-            if records.is_empty() {
-                debug!("No records to commit for namespace {:?}", namespace);
-                return Ok(());
-            }
-
-            info!(
-                "Committing {} records for namespace {:?}",
-                records.len(),
-                namespace
-            );
-
-            let mut accumulator = AccumulatorVariant::new(accumulator_type);
-
-            let mut records_to_track = Vec::new();
-            for record in &records {
-                accumulator.put(record.key, record.value)?;
-                records_to_track.push(CommittedRecord {
-                    namespace: record.namespace,
-                    key: record.key,
-                    value: record.value,
-                    timestamp: record.timestamp,
-                });
-            }
-
-            let root = accumulator.build_root()?;
-            let record_count = records.len();
-
-            (root, record_count, records_to_track)
-        };
-
-        let commitment = Commitment {
-            namespace: *namespace,
-            root: root.clone(),
-            committed_at,
-        };
-
-        let meta = BatchCommitmentMeta {
-            commitment,
-            leaf_count: record_count as u64,
-        };
-
-        commitment_registry.commit(&meta).await?;
-
-        let proofs: Vec<StoredProof> = Vec::new();
-        if !proofs.is_empty() {
-            proof_registry.save_proofs(&proofs).await?;
-        }
-
-        {
-            let mut committed = committed_records.lock().unwrap();
-            committed.extend(records_to_track);
-        }
-
-        info!(
-            "Committed namespace {:?}: {} records, root len={} - tracked for pruning",
-            namespace,
-            record_count,
-            root.len()
-        );
-
-        Ok(())
-    }
-
     /// Get current unix timestamp in seconds.
     pub fn now_secs() -> u64 {
         SystemTime::now()
@@ -971,6 +700,10 @@ impl RootSmith {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
+    use crate::config::AccumulatorType;
+    use crate::proof_registry::{MockProofRegistry, ProofRegistryVariant};
+    use tempfile::tempdir;
 
     #[test]
     fn test_now_secs() {
@@ -985,5 +718,334 @@ mod tests {
         assert!(app_now > 0);
         assert!(app_now < u64::MAX);
         assert!((app_now as i64 - now as i64).abs() < 2);
+    }
+
+    #[tokio::test]
+    async fn test_storage_writer_task() {
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir.path().join("test_storage_writer");
+        let storage = Storage::open(storage_path.to_str().unwrap()).unwrap();
+        let storage = Arc::new(Mutex::new(storage));
+        let active_namespaces = Arc::new(Mutex::new(HashMap::new()));
+
+        let (tx, rx) = unbounded_async::<IncomingRecord>();
+        let (_shutdown_tx, shutdown_rx) = broadcast::channel::<ShutdownSignal>(1);
+
+        // Spawn storage writer task
+        let storage_clone = Arc::clone(&storage);
+        let namespaces_clone = Arc::clone(&active_namespaces);
+        let task = tokio::spawn(async move {
+            RootSmith::storage_writer_task(storage_clone, namespaces_clone, rx, shutdown_rx).await
+        });
+
+        // Send test records
+        let namespace = [1u8; 32];
+        let record = IncomingRecord {
+            namespace,
+            key: [2u8; 32],
+            value: [3u8; 32],
+            timestamp: 100,
+        };
+
+        tx.send(record.clone()).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Verify record was stored
+        {
+            let storage_guard = storage.lock().unwrap();
+            let filter = crate::storage::StorageScanFilter {
+                namespace,
+                timestamp: None,
+            };
+            let records = storage_guard.scan(&filter).unwrap();
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].key, record.key);
+        }
+
+        // Verify namespace was marked active
+        {
+            let namespaces = active_namespaces.lock().unwrap();
+            assert!(namespaces.contains_key(&namespace));
+        }
+
+        // Close channel to signal completion
+        drop(tx);
+        task.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_read_and_build_commit() {
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir.path().join("test_read_build");
+        let storage = Storage::open(storage_path.to_str().unwrap()).unwrap();
+
+        // Add test records
+        let namespace = [1u8; 32];
+        let timestamp = 100;
+        for i in 0..3 {
+            let record = IncomingRecord {
+                namespace,
+                key: [i; 32],
+                value: [i + 10; 32],
+                timestamp,
+            };
+            storage.put(&record).unwrap();
+        }
+
+        let storage = Arc::new(Mutex::new(storage));
+
+        // Test reading and building commit
+        let result = RootSmith::read_and_build_commit(
+            &storage,
+            namespace,
+            timestamp + 1,
+            AccumulatorType::Merkle,
+        )
+        .unwrap();
+
+        assert!(result.is_some());
+        let commit_data = result.unwrap();
+        assert_eq!(commit_data.namespace, namespace);
+        assert_eq!(commit_data.leaf_count, 3);
+        assert_eq!(commit_data.records_to_track.len(), 3);
+        assert!(!commit_data.root.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_read_and_build_commit_empty() {
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir.path().join("test_read_build_empty");
+        let storage = Storage::open(storage_path.to_str().unwrap()).unwrap();
+        let storage = Arc::new(Mutex::new(storage));
+
+        // Test with no records
+        let namespace = [1u8; 32];
+        let result = RootSmith::read_and_build_commit(
+            &storage,
+            namespace,
+            100,
+            AccumulatorType::Merkle,
+        )
+        .unwrap();
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_deliver_commitment() {
+        let commitment_registry = MockCommitmentRegistry::new();
+        let commitment_registry_clone = commitment_registry.clone();
+        let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
+        let proof_registry = ProofRegistryVariant::Mock(MockProofRegistry::new());
+
+        let commit_data = CommitData {
+            namespace: [1u8; 32],
+            root: vec![0xaa, 0xbb, 0xcc],
+            committed_at: 100,
+            leaf_count: 5,
+            records_to_track: vec![],
+        };
+
+        RootSmith::deliver_commitment(
+            &commitment_registry_variant,
+            &proof_registry,
+            &commit_data,
+        )
+        .await
+        .unwrap();
+
+        // Verify commitment was registered
+        let commitments = commitment_registry_clone.get_commitments();
+        assert_eq!(commitments.len(), 1);
+        assert_eq!(commitments[0].commitment.namespace, commit_data.namespace);
+        assert_eq!(commitments[0].commitment.root, commit_data.root);
+        assert_eq!(commitments[0].leaf_count, commit_data.leaf_count);
+    }
+
+    #[tokio::test]
+    async fn test_prune_records() {
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir.path().join("test_prune");
+        let storage = Storage::open(storage_path.to_str().unwrap()).unwrap();
+
+        // Add test records
+        let namespace = [1u8; 32];
+        let timestamp = 100;
+        for i in 0..3 {
+            let record = IncomingRecord {
+                namespace,
+                key: [i; 32],
+                value: [i + 10; 32],
+                timestamp,
+            };
+            storage.put(&record).unwrap();
+        }
+
+        let storage = Arc::new(Mutex::new(storage));
+
+        // Verify records exist
+        {
+            let storage_guard = storage.lock().unwrap();
+            let filter = crate::storage::StorageScanFilter {
+                namespace,
+                timestamp: None,
+            };
+            let records = storage_guard.scan(&filter).unwrap();
+            assert_eq!(records.len(), 3);
+        }
+
+        // Prune records
+        let records_to_prune = vec![
+            CommittedRecord {
+                namespace,
+                key: [0; 32],
+                value: [10; 32],
+                timestamp,
+            },
+            CommittedRecord {
+                namespace,
+                key: [1; 32],
+                value: [11; 32],
+                timestamp,
+            },
+            CommittedRecord {
+                namespace,
+                key: [2; 32],
+                value: [12; 32],
+                timestamp,
+            },
+        ];
+
+        RootSmith::prune_records(&storage, records_to_prune).unwrap();
+
+        // Verify records were pruned
+        {
+            let storage_guard = storage.lock().unwrap();
+            let filter = crate::storage::StorageScanFilter {
+                namespace,
+                timestamp: Some(timestamp),
+            };
+            let records = storage_guard.scan(&filter).unwrap();
+            assert_eq!(records.len(), 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_graceful_shutdown_signal() {
+        // Test that shutdown signal propagates correctly
+        let (shutdown_tx, mut shutdown_rx1) = broadcast::channel::<ShutdownSignal>(2);
+        let mut shutdown_rx2 = shutdown_tx.subscribe();
+
+        // Send shutdown signal
+        shutdown_tx.send(ShutdownSignal).unwrap();
+
+        // Both receivers should get the signal
+        tokio::select! {
+            result = shutdown_rx1.recv() => {
+                assert!(result.is_ok());
+            }
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                panic!("Shutdown signal not received by receiver 1");
+            }
+        }
+
+        tokio::select! {
+            result = shutdown_rx2.recv() => {
+                assert!(result.is_ok());
+            }
+            _ = tokio::time::sleep(Duration::from_secs(1)) => {
+                panic!("Shutdown signal not received by receiver 2");
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_task_communication_chain() {
+        // Test the full chain of task communication
+        let temp_dir = tempdir().unwrap();
+        let storage_path = temp_dir.path().join("test_chain");
+        let storage = Storage::open(storage_path.to_str().unwrap()).unwrap();
+        let storage = Arc::new(Mutex::new(storage));
+
+        let (commit_tx, commit_rx) = unbounded_async::<CommitRequest>();
+        let (delivery_tx, delivery_rx) = unbounded_async::<CommitData>();
+        let (pruning_tx, pruning_rx) = unbounded_async::<Vec<CommittedRecord>>();
+
+        // Add test records to storage
+        let namespace = [1u8; 32];
+        let timestamp = 100;
+        for i in 0..2 {
+            let record = IncomingRecord {
+                namespace,
+                key: [i; 32],
+                value: [i + 10; 32],
+                timestamp,
+            };
+            storage.lock().unwrap().put(&record).unwrap();
+        }
+
+        // Spawn commit reader task
+        let storage_clone = Arc::clone(&storage);
+        let (_, shutdown_rx1) = broadcast::channel::<ShutdownSignal>(1);
+        let commit_reader = tokio::spawn(async move {
+            RootSmith::commit_reader_task(
+                storage_clone,
+                AccumulatorType::Merkle,
+                commit_rx,
+                delivery_tx,
+                shutdown_rx1,
+            )
+            .await
+        });
+
+        // Spawn delivery task
+        let commitment_registry = MockCommitmentRegistry::new();
+        let commitment_registry_clone = commitment_registry.clone();
+        let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
+        let proof_registry = ProofRegistryVariant::Mock(MockProofRegistry::new());
+        let (_, shutdown_rx2) = broadcast::channel::<ShutdownSignal>(1);
+        let delivery = tokio::spawn(async move {
+            RootSmith::delivery_task(
+                commitment_registry_variant,
+                proof_registry,
+                delivery_rx,
+                pruning_tx,
+                shutdown_rx2,
+            )
+            .await
+        });
+
+        // Spawn pruning task
+        let storage_clone = Arc::clone(&storage);
+        let (_, shutdown_rx3) = broadcast::channel::<ShutdownSignal>(1);
+        let pruning = tokio::spawn(async move {
+            RootSmith::pruning_task(storage_clone, pruning_rx, shutdown_rx3).await
+        });
+
+        // Send commit request
+        commit_tx
+            .send(CommitRequest {
+                namespace,
+                committed_at: timestamp + 1,
+            })
+            .await
+            .unwrap();
+
+        // Give tasks time to process
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        // Close channels to signal completion
+        drop(commit_tx);
+
+        // Wait for all tasks
+        commit_reader.await.unwrap().unwrap();
+        delivery.await.unwrap().unwrap();
+        pruning.await.unwrap().unwrap();
+
+        // Verify commitment was created
+        let commitments = commitment_registry_clone.get_commitments();
+        assert_eq!(commitments.len(), 1);
+        assert_eq!(commitments[0].commitment.namespace, namespace);
+        assert_eq!(commitments[0].leaf_count, 2);
     }
 }
