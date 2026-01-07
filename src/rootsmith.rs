@@ -340,7 +340,7 @@ impl RootSmith {
                 // Reset epoch
                 {
                     let mut epoch_start = epoch_start_ts.lock().unwrap();
-                    *epoch_start = Self::now_secs();
+                    *epoch_start = committed_at;
                 }
                 {
                     let mut ns = active_namespaces.lock().unwrap();
