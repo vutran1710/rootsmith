@@ -117,7 +117,7 @@ impl RootSmith {
 
         let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
 
-        let handle_upstream_task = {
+        let handle_upstream_task = async move {
             info!("Starting upstream connector: {}", self.upstream.name());
             // TODO: Handle upstream errors and shutdown signals properly
         };
