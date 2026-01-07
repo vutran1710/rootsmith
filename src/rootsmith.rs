@@ -366,7 +366,12 @@ impl RootSmith {
                     };
 
                     if should_final_commit {
-                        let committed_at = Self::now_secs();
+                        // Align final commit timestamp with regular epoch-based commits:
+                        // committed_at = epoch_start + batch_interval_secs
+                        let now = Self::now_secs();
+                        let interval = config.batch_interval_secs;
+                        let epoch_start = now - (now % interval);
+                        let committed_at = epoch_start + interval;
 
                         let namespaces: Vec<Namespace> = {
                             let ns = active_namespaces.lock().unwrap();
