@@ -2,10 +2,12 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::info;
 
+mod archive;
 mod commitment_registry;
 mod config;
 mod crypto;
 mod feature_select;
+mod proof_delivery;
 mod proof_registry;
 mod rootsmith;
 mod storage;
@@ -31,7 +33,7 @@ async fn main() -> Result<()> {
     );
 
     // Initialize and run the app
-    let app = RootSmith::initialize(config)?;
+    let app = RootSmith::initialize(config).await?;
     app.run().await?;
 
     info!("Rootsmith shutdown complete");
