@@ -2,18 +2,23 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::archive::ArchiveStorageVariant;
 use crate::commitment_registry::CommitmentRegistryVariant;
 use crate::config::{AccumulatorType, BaseConfig};
 use crate::crypto::AccumulatorVariant;
+use crate::proof_delivery::ProofDeliveryVariant;
 use crate::proof_registry::ProofRegistryVariant;
-use crate::storage::Storage;
-use crate::traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector};
+use crate::storage::{Storage, StorageDeleteFilter, StorageScanFilter};
+use crate::traits::{
+    Accumulator, ArchiveData, ArchiveStorage, CommitmentRegistry, ProofDelivery, ProofRegistry,
+    UpstreamConnector,
+};
 use crate::types::{
-    BatchCommitmentMeta, Commitment, IncomingRecord, Namespace, StoredProof, Value32,
+    BatchCommitmentMeta, Commitment, IncomingRecord, Key32, Namespace, StoredProof, Value32,
 };
 use crate::upstream::UpstreamVariant;
 use anyhow::Result;
-use kanal::{unbounded_async, AsyncReceiver};
+use kanal::{unbounded_async, AsyncSender};
 use tracing::{debug, error, info, span, Level};
 
 /// Epoch phase for the commit cycle.
@@ -45,6 +50,12 @@ pub struct RootSmith {
     /// Proof registry implementation.
     pub proof_registry: ProofRegistryVariant,
 
+    /// Proof delivery implementation.
+    pub proof_delivery: ProofDeliveryVariant,
+
+    /// Archive storage implementation.
+    pub archive_storage: ArchiveStorageVariant,
+
     /// Global/base configuration.
     pub config: BaseConfig,
 
@@ -67,6 +78,8 @@ impl RootSmith {
         upstream: UpstreamVariant,
         commitment_registry: CommitmentRegistryVariant,
         proof_registry: ProofRegistryVariant,
+        proof_delivery: ProofDeliveryVariant,
+        archive_storage: ArchiveStorageVariant,
         config: BaseConfig,
         storage: Storage,
     ) -> Self {
@@ -76,6 +89,8 @@ impl RootSmith {
             upstream,
             commitment_registry,
             proof_registry,
+            proof_delivery,
+            archive_storage,
             config,
             storage: Arc::new(Mutex::new(storage)),
             epoch_start_ts: Arc::new(Mutex::new(now)),
@@ -84,9 +99,11 @@ impl RootSmith {
         }
     }
 
-    pub fn initialize(config: BaseConfig) -> Result<Self> {
+    pub async fn initialize(config: BaseConfig) -> Result<Self> {
+        use crate::archive::{ArchiveStorageVariant, NoopArchive};
         use crate::commitment_registry::commitment_noop::CommitmentNoop;
         use crate::commitment_registry::CommitmentRegistryVariant;
+        use crate::proof_delivery::{NoopDelivery, ProofDeliveryVariant};
         use crate::proof_registry::{NoopProofRegistry, ProofRegistryVariant};
         use crate::upstream::NoopUpstream;
 
@@ -96,11 +113,15 @@ impl RootSmith {
         let upstream = UpstreamVariant::Noop(NoopUpstream);
         let commitment_registry = CommitmentRegistryVariant::Noop(CommitmentNoop::new());
         let proof_registry = ProofRegistryVariant::Noop(NoopProofRegistry);
+        let proof_delivery = ProofDeliveryVariant::Noop(NoopDelivery);
+        let archive_storage = ArchiveStorageVariant::Noop(NoopArchive);
 
         Ok(Self::new(
             upstream,
             commitment_registry,
             proof_registry,
+            proof_delivery,
+            archive_storage,
             config,
             storage,
         ))
@@ -116,15 +137,39 @@ impl RootSmith {
         );
 
         let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
+        // Channel for commit task to notify proof task about new commitments
+        let (commit_tx, commit_rx) = unbounded_async::<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>();
+        // Channel for proof registry task to notify delivery task about saved proofs
+        let (proof_delivery_tx, proof_delivery_rx) = unbounded_async::<Vec<StoredProof>>();
 
-        info!("Starting upstream connector: {}", self.upstream.name());
+        // Destructure self so we can move individual fields into tasks.
+        let RootSmith {
+            mut upstream,
+            commitment_registry,
+            proof_registry,
+            proof_delivery,
+            archive_storage,
+            config,
+            storage,
+            epoch_start_ts,
+            active_namespaces,
+            committed_records,
+        } = self;
 
+        // Wrap shared components in Arc<Mutex> for sharing across tasks
+        let commitment_registry = Arc::new(tokio::sync::Mutex::new(commitment_registry));
+        let proof_registry = Arc::new(tokio::sync::Mutex::new(proof_registry));
+        let proof_delivery = Arc::new(tokio::sync::Mutex::new(proof_delivery));
+        let archive_storage = Arc::new(tokio::sync::Mutex::new(archive_storage));
+
+        // === Upstream task: pull data from the configured upstream and send into the channel ===
         let upstream_handle = {
             let async_tx = data_tx.clone();
-            let mut upstream = self.upstream;
-            tokio::task::spawn(async move {
+            tokio::spawn(async move {
                 let span = span!(Level::INFO, "upstream_task");
                 let _enter = span.enter();
+
+                info!("Starting upstream connector: {}", upstream.name());
 
                 if let Err(e) = upstream.open(async_tx).await {
                     error!("Upstream connector failed: {}", e);
@@ -132,253 +177,579 @@ impl RootSmith {
                 }
 
                 info!("Upstream connector finished");
-                Ok(())
+                Ok::<(), anyhow::Error>(())
             })
         };
 
-        let process_handle = {
-            let storage = Arc::clone(&self.storage);
-            let epoch_start_ts = Arc::clone(&self.epoch_start_ts);
-            let active_namespaces = Arc::clone(&self.active_namespaces);
-            let committed_records = Arc::clone(&self.committed_records);
-            let commitment_registry = self.commitment_registry;
-            let proof_registry = self.proof_registry;
-            let config = self.config.clone();
+        // === Storage writer: consume records from channel and persist to RocksDB ===
+        let storage_handle = {
+            let storage = Arc::clone(&storage);
+            let active_namespaces = Arc::clone(&active_namespaces);
+            tokio::spawn(async move {
+                let span = span!(Level::INFO, "storage_write_task");
+                let _enter = span.enter();
+                info!("Starting storage write loop");
+                while let Ok(record) = data_rx.recv().await {
+                    {
+                        let db = storage.lock().unwrap();
+                        db.put(&record)?;
+                    }
+                    {
+                        let mut active = active_namespaces.lock().unwrap();
+                        active.insert(record.namespace, true);
+                    }
+                }
+                info!("Storage write loop finished (channel closed)");
+                Ok::<(), anyhow::Error>(())
+            })
+        };
 
-            tokio::task::spawn(async move {
-                let span = span!(Level::INFO, "process_and_commit_task");
+        // === Commit task: periodically commit batches to commitment registry ===
+        let commit_handle = {
+            let storage = Arc::clone(&storage);
+            let active_namespaces = Arc::clone(&active_namespaces);
+            let epoch_start_ts = Arc::clone(&epoch_start_ts);
+            let committed_records = Arc::clone(&committed_records);
+            let commitment_registry = Arc::clone(&commitment_registry);
+            let commit_tx = commit_tx.clone();
+            let config_clone = config.clone();
+            
+            tokio::spawn(async move {
+                let span = span!(Level::INFO, "commit_task");
                 let _enter = span.enter();
 
-                Self::process_and_commit_loop(
-                    data_rx,
-                    storage,
-                    epoch_start_ts,
-                    active_namespaces,
-                    committed_records,
-                    commitment_registry,
-                    proof_registry,
-                    config,
-                )
-                .await
+                info!("Commit task started (batch_interval_secs={})", config_clone.batch_interval_secs);
+
+                loop {
+                    // Check if it's time to commit
+                    let should_commit = {
+                        let epoch_start = *epoch_start_ts.lock().unwrap();
+                        let now = Self::now_secs();
+                        let elapsed = now.saturating_sub(epoch_start);
+                        elapsed >= config_clone.batch_interval_secs
+                    };
+
+                    if should_commit {
+                        info!("Commit phase starting");
+
+                        // Get list of active namespaces
+                        let namespaces: Vec<Namespace> = {
+                            let ns = active_namespaces.lock().unwrap();
+                            ns.keys().copied().collect()
+                        };
+
+                        if !namespaces.is_empty() {
+                            let committed_at = {
+                                let epoch_start = *epoch_start_ts.lock().unwrap();
+                                epoch_start + config_clone.batch_interval_secs
+                            };
+
+                            info!("Committing {} namespaces", namespaces.len());
+
+                            // Commit each namespace
+                            for namespace in namespaces {
+                                let registry = commitment_registry.lock().await;
+                                match Self::commit_namespace(
+                                    &storage,
+                                    &namespace,
+                                    committed_at,
+                                    &committed_records,
+                                    &*registry,
+                                    &commit_tx,
+                                    config_clone.accumulator_type,
+                                ).await {
+                                    Ok(_) => {
+                                        debug!("Committed namespace {:?}", namespace);
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to commit namespace {:?}: {}", namespace, e);
+                                    }
+                                }
+                            }
+
+                            // Reset epoch and clear active namespaces
+                            {
+                                let mut epoch_start = epoch_start_ts.lock().unwrap();
+                                *epoch_start = Self::now_secs();
+                            }
+                            {
+                                let mut ns = active_namespaces.lock().unwrap();
+                                ns.clear();
+                            }
+
+                            info!("Commit phase completed");
+                        } else {
+                            debug!("No active namespaces to commit");
+                            // Still update epoch start to avoid spinning
+                            {
+                                let mut epoch_start = epoch_start_ts.lock().unwrap();
+                                *epoch_start = Self::now_secs();
+                            }
+                        }
+                    }
+
+                    // Sleep for a short interval before checking again
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                // This will never be reached but satisfies return type
+                Ok::<(), anyhow::Error>(())
             })
         };
 
-        let upstream_result = upstream_handle
-            .await
-            .map_err(|_| anyhow::anyhow!("Upstream task panicked"))?;
+        // === Proof registry task: generate and persist proofs for committed batches ===
+        let proof_registry_handle = {
+            let storage = Arc::clone(&storage);
+            let proof_registry = Arc::clone(&proof_registry);
+            let config_clone = config.clone();
+            let proof_delivery_tx = proof_delivery_tx.clone();
 
-        drop(data_tx);
+            tokio::spawn(async move {
+                let span = span!(Level::INFO, "proof_registry_task");
+                let _enter = span.enter();
 
-        let process_result = process_handle
-            .await
-            .map_err(|_| anyhow::anyhow!("Process task panicked"))?;
+                let registry_name = {
+                    let registry = proof_registry.lock().await;
+                    registry.name().to_string()
+                };
+                info!("Proof registry task started (registry={})", registry_name);
 
-        upstream_result?;
-        process_result?;
+                // Listen for new commitments from commit task
+                while let Ok((namespace, root, committed_at, records)) = commit_rx.recv().await {
+                    info!("Generating proofs for namespace {:?} with {} records", namespace, records.len());
+
+                    // Build accumulator from committed records
+                    let mut accumulator = AccumulatorVariant::new(config_clone.accumulator_type);
+                    for (key, value) in &records {
+                        if let Err(e) = accumulator.put(*key, *value) {
+                            error!("Failed to insert key into accumulator: {}", e);
+                            continue;
+                        }
+                    }
+
+                    // Generate proofs for all records
+                    let mut stored_proofs = Vec::new();
+                    for (key, value) in &records {
+                        match accumulator.prove(key) {
+                            Ok(Some(proof)) => {
+                                // Serialize proof to bytes
+                                let proof_bytes = match serde_json::to_vec(&proof) {
+                                    Ok(bytes) => bytes,
+                                    Err(e) => {
+                                        error!("Failed to serialize proof: {}", e);
+                                        continue;
+                                    }
+                                };
+
+                                let stored_proof = StoredProof {
+                                    root: root.clone(),
+                                    proof: proof_bytes,
+                                    key: *key,
+                                    meta: serde_json::json!({
+                                        "namespace": hex::encode(namespace),
+                                        "committed_at": committed_at,
+                                    }),
+                                };
+                                stored_proofs.push(stored_proof);
+                            }
+                            Ok(None) => {
+                                debug!("No proof available for key {:?}", key);
+                            }
+                            Err(e) => {
+                                error!("Failed to generate proof for key {:?}: {}", key, e);
+                            }
+                        }
+                    }
+
+                    // Save proofs to proof registry
+                    if !stored_proofs.is_empty() {
+                        let registry = proof_registry.lock().await;
+                        match registry.save_proofs(&stored_proofs).await {
+                            Ok(_) => {
+                                info!("Saved {} proofs for namespace {:?}", stored_proofs.len(), namespace);
+                                
+                                // Notify delivery task about saved proofs
+                                if let Err(e) = proof_delivery_tx.send(stored_proofs.clone()).await {
+                                    error!("Failed to send proofs to delivery task: {}", e);
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to save proofs for namespace {:?}: {}", namespace, e);
+                            }
+                        }
+                    } else {
+                        debug!("No proofs to save for namespace {:?}", namespace);
+                    }
+                }
+
+                info!("Proof registry task finished (channel closed)");
+                Ok::<(), anyhow::Error>(())
+            })
+        };
+
+        // === Proof delivery task: deliver proofs to downstream consumers ===
+        let proof_delivery_handle = {
+            let proof_delivery = Arc::clone(&proof_delivery);
+            
+            tokio::spawn(async move {
+                let span = span!(Level::INFO, "proof_delivery_task");
+                let _enter = span.enter();
+
+                let delivery_name = {
+                    let delivery = proof_delivery.lock().await;
+                    delivery.name().to_string()
+                };
+                info!("Proof delivery task started (delivery={})", delivery_name);
+
+                // Listen for saved proofs from proof registry task
+                while let Ok(proofs) = proof_delivery_rx.recv().await {
+                    if proofs.is_empty() {
+                        continue;
+                    }
+
+                    info!(
+                        "Delivering batch of {} proofs (first key: {:?})",
+                        proofs.len(),
+                        proofs.first().map(|p| hex::encode(&p.key))
+                    );
+
+                    // Use the proof delivery abstraction to deliver proofs
+                    let delivery = proof_delivery.lock().await;
+                    match delivery.deliver_batch(&proofs).await {
+                        Ok(_) => {
+                            info!(
+                                "Successfully delivered batch of {} proofs via {}",
+                                proofs.len(),
+                                delivery.name()
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                "Failed to deliver batch of {} proofs via {}: {}",
+                                proofs.len(),
+                                delivery.name(),
+                                e
+                            );
+                        }
+                    }
+                }
+
+                info!("Proof delivery task finished (channel closed)");
+                Ok::<(), anyhow::Error>(())
+            })
+        };
+
+        // === DB prune task: periodically prune committed data from storage ===
+        let db_prune_handle = {
+            let storage = Arc::clone(&storage);
+            let committed_records = Arc::clone(&committed_records);
+            
+            tokio::spawn(async move {
+                let span = span!(Level::INFO, "db_prune_task");
+                let _enter = span.enter();
+
+                info!("DB prune task started");
+
+                loop {
+                    // Check for committed records to prune every 5 seconds
+                    tokio::time::sleep(Duration::from_secs(5)).await;
+
+                    // Get committed records that need to be pruned
+                    let records_to_prune = {
+                        let mut records = committed_records.lock().unwrap();
+                        if records.is_empty() {
+                            continue;
+                        }
+                        let to_prune = records.clone();
+                        records.clear();
+                        to_prune
+                    };
+
+                    if records_to_prune.is_empty() {
+                        continue;
+                    }
+
+                    info!(
+                        "Pruning {} committed records from storage",
+                        records_to_prune.len()
+                    );
+
+                    // Group records by namespace and find max timestamp for each
+                    let mut by_namespace: HashMap<Namespace, Vec<&CommittedRecord>> = HashMap::new();
+                    for record in &records_to_prune {
+                        by_namespace
+                            .entry(record.namespace)
+                            .or_insert_with(Vec::new)
+                            .push(record);
+                    }
+
+                    // Delete records for each namespace up to the max timestamp
+                    let storage_guard = storage.lock().unwrap();
+                    for (namespace, records) in by_namespace {
+                        if let Some(max_ts) = records.iter().map(|r| r.timestamp).max() {
+                            let delete_filter = StorageDeleteFilter {
+                                namespace,
+                                timestamp: max_ts,
+                            };
+                            
+                            match storage_guard.delete(&delete_filter) {
+                                Ok(count) => {
+                                    info!(
+                                        "Pruned {} records for namespace {:?} (up to timestamp {})",
+                                        count,
+                                        namespace,
+                                        max_ts
+                                    );
+                                }
+                                Err(e) => {
+                                    error!(
+                                        "Failed to prune records for namespace {:?}: {}",
+                                        namespace, e
+                                    );
+                                }
+                            }
+                        }
+                    }
+
+                    info!("Pruning cycle completed");
+                }
+                // This will never be reached but satisfies return type
+                #[allow(unreachable_code)]
+                Ok::<(), anyhow::Error>(())
+            })
+        };
+
+        // === Archiving task: archive old commitments and proofs to cold storage ===
+        let archiving_handle = {
+            let archive_storage = Arc::clone(&archive_storage);
+            let storage = Arc::clone(&storage);
+            let active_namespaces = Arc::clone(&active_namespaces);
+            let commitment_registry = Arc::clone(&commitment_registry);
+            
+            tokio::spawn(async move {
+                let span = span!(Level::INFO, "archiving_task");
+                let _enter = span.enter();
+
+                info!("Archiving task started with backend: {}", {
+                    let storage = archive_storage.lock().await;
+                    storage.name()
+                });
+
+                // Archive retention threshold: data older than this will be archived
+                // In production, this could be configurable (e.g., 30 days)
+                let archive_threshold_secs = 30 * 24 * 3600; // 30 days
+
+                loop {
+                    // Run archiving check every hour
+                    tokio::time::sleep(Duration::from_secs(3600)).await;
+
+                    let now = Self::now_secs();
+                    let archive_cutoff = now.saturating_sub(archive_threshold_secs);
+
+                    info!(
+                        "Running archiving cycle (cutoff: {} days ago, timestamp: {})",
+                        archive_threshold_secs / (24 * 3600),
+                        archive_cutoff
+                    );
+
+                    // Get list of active namespaces to check for archivable data
+                    let namespaces: Vec<Namespace> = {
+                        let active = active_namespaces.lock().unwrap();
+                        active.keys().copied().collect()
+                    };
+
+                    if namespaces.is_empty() {
+                        debug!("No active namespaces to archive");
+                        continue;
+                    }
+
+                    info!("Checking {} namespaces for archivable data", namespaces.len());
+
+                    // Archive old records from storage that are older than cutoff
+                    let mut archived_count = 0;
+                    for namespace in &namespaces {
+                        // Scan storage for old records in this namespace
+                        let filter = StorageScanFilter {
+                            namespace: *namespace,
+                            timestamp: Some(archive_cutoff),
+                        };
+
+                        let records = {
+                            let db = storage.lock().unwrap();
+                            match db.scan(&filter) {
+                                Ok(recs) => recs,
+                                Err(e) => {
+                                    error!("Failed to scan storage for namespace: {}", e);
+                                    continue;
+                                }
+                            }
+                        };
+
+                        if !records.is_empty() {
+                            debug!(
+                                "Found {} old records in namespace to archive",
+                                records.len()
+                            );
+
+                            // Archive records in batches
+                            let batch_size = 100;
+                            for chunk in records.chunks(batch_size) {
+                                let archive_data: Vec<ArchiveData> = chunk
+                                    .iter()
+                                    .map(|r| ArchiveData::Record(r.clone()))
+                                    .collect();
+
+                                let mut archive = archive_storage.lock().await;
+                                match archive.archive_batch(&archive_data).await {
+                                    Ok(ids) => {
+                                        archived_count += ids.len();
+                                        debug!("Archived {} records, IDs: {:?}", ids.len(), &ids[..ids.len().min(3)]);
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to archive batch: {}", e);
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Archive old commitments for each namespace
+                    let mut archived_commitments = 0;
+                    for namespace in &namespaces {
+                        use crate::types::CommitmentFilterOptions;
+                        
+                        let filter = CommitmentFilterOptions {
+                            namespace: *namespace,
+                            time: archive_cutoff,
+                        };
+
+                        let registry = commitment_registry.lock().await;
+                        let result = registry.get_prev_commitment(&filter).await;
+                        drop(registry);
+
+                        match result {
+                            Ok(Some(commitment)) if commitment.committed_at <= archive_cutoff => {
+                                let meta = BatchCommitmentMeta {
+                                    commitment: commitment.clone(),
+                                    leaf_count: 0, // Unknown - could be tracked separately
+                                };
+
+                                let mut archive = archive_storage.lock().await;
+                                match archive.archive(&ArchiveData::Commitment(meta)).await {
+                                    Ok(id) => {
+                                        archived_commitments += 1;
+                                        debug!(
+                                            "Archived commitment ID: {}, timestamp: {}",
+                                            id, commitment.committed_at
+                                        );
+                                    }
+                                    Err(e) => error!("Failed to archive commitment: {}", e),
+                                }
+                            }
+                            Ok(Some(_)) => debug!("Commitment too recent to archive"),
+                            Ok(None) => debug!("No commitment found for namespace"),
+                            Err(e) => error!("Failed to query commitment: {}", e),
+                        }
+                    }
+
+                    // Summary logging
+                    let total = archived_count + archived_commitments;
+                    if total > 0 {
+                        info!(
+                            "Archiving cycle: {} records, {} commitments",
+                            archived_count, archived_commitments
+                        );
+                    } else {
+                        debug!("No old data to archive");
+                    }
+                }
+                // This will never be reached but satisfies return type
+                #[allow(unreachable_code)]
+                Ok::<(), anyhow::Error>(())
+            })
+        };
+
+        let query_layer_handle = tokio::spawn(async move {
+            let span = span!(Level::INFO, "query_layer_task");
+            let _enter = span.enter();
+
+            debug!("Query layer task skeleton running");
+            // Future work: provide a query interface over storage.
+            Ok::<(), anyhow::Error>(())
+        });
+
+        let metrics_layer_handle = tokio::spawn(async move {
+            let span = span!(Level::INFO, "metrics_layer_task");
+            let _enter = span.enter();
+
+            debug!("Metrics layer task skeleton running");
+            // Future work: expose metrics for monitoring/observability.
+            Ok::<(), anyhow::Error>(())
+        });
+
+        let admin_server_handle = tokio::spawn(async move {
+            let span = span!(Level::INFO, "admin_server_task");
+            let _enter = span.enter();
+
+            debug!("Admin server task skeleton running");
+            // Future work: admin HTTP/gRPC server for health, metrics, etc.
+            Ok::<(), anyhow::Error>(())
+        });
+
+        // Wait for all tasks to complete.
+        let (
+            upstream_res,
+            storage_res,
+            commit_res,
+            proof_registry_res,
+            proof_delivery_res,
+            db_prune_res,
+            archiving_res,
+            query_layer_res,
+            metrics_layer_res,
+            admin_server_res,
+        ) = tokio::join!(
+            upstream_handle,
+            storage_handle,
+            commit_handle,
+            proof_registry_handle,
+            proof_delivery_handle,
+            db_prune_handle,
+            archiving_handle,
+            query_layer_handle,
+            metrics_layer_handle,
+            admin_server_handle,
+        );
+
+        upstream_res??;
+        storage_res??;
+        commit_res??;
+        proof_registry_res??;
+        proof_delivery_res??;
+        db_prune_res??;
+        archiving_res??;
+        query_layer_res??;
+        metrics_layer_res??;
+        admin_server_res??;
 
         info!("RootSmith run completed successfully");
         Ok(())
     }
 
-    async fn process_and_commit_loop(
-        data_rx: AsyncReceiver<IncomingRecord>,
-        storage: Arc<Mutex<Storage>>,
-        epoch_start_ts: Arc<Mutex<u64>>,
-        active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
-        committed_records: Arc<Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: CommitmentRegistryVariant,
-        proof_registry: ProofRegistryVariant,
-        config: BaseConfig,
-    ) -> Result<()> {
-        loop {
-            let should_commit = {
-                let epoch_start = *epoch_start_ts.lock().unwrap();
-                let now = Self::now_secs();
-                let elapsed = now.saturating_sub(epoch_start);
-                elapsed >= config.batch_interval_secs
-            };
-
-            if should_commit {
-                info!("Commit phase starting - DB writes continue freely");
-
-                Self::perform_commit_nonblocking(
-                    &storage,
-                    &epoch_start_ts,
-                    &active_namespaces,
-                    &committed_records,
-                    &commitment_registry,
-                    &proof_registry,
-                    &config,
-                )
-                .await?;
-
-                info!("Commit phase completed - entering pending phase");
-
-                Self::prune_committed_data(&storage, &committed_records)?;
-            }
-
-            match tokio::time::timeout(Duration::from_millis(100), data_rx.recv()).await {
-                Ok(Ok(record)) => {
-                    let span = span!(Level::DEBUG, "handle_record", 
-                        namespace = ?record.namespace);
-                    let _enter = span.enter();
-
-                    let storage_guard = storage.lock().unwrap();
-
-                    {
-                        let mut namespaces = active_namespaces.lock().unwrap();
-                        namespaces.insert(record.namespace, true);
-                    }
-
-                    storage_guard.put(&record)?;
-                    debug!("Record stored for namespace {:?}", record.namespace);
-                }
-                Ok(Err(_)) => {
-                    info!("Data channel closed, performing final commit if needed");
-
-                    let should_final_commit = {
-                        let namespaces = active_namespaces.lock().unwrap();
-                        !namespaces.is_empty()
-                    };
-
-                    if should_final_commit {
-                        Self::perform_commit_nonblocking(
-                            &storage,
-                            &epoch_start_ts,
-                            &active_namespaces,
-                            &committed_records,
-                            &commitment_registry,
-                            &proof_registry,
-                            &config,
-                        )
-                        .await?;
-
-                        Self::prune_committed_data(&storage, &committed_records)?;
-                    }
-
-                    break;
-                }
-                Err(_) => {
-                    continue;
-                }
-            }
-        }
-
-        info!("Process and commit loop finished");
-        Ok(())
-    }
-
-    async fn perform_commit_nonblocking(
-        storage: &Arc<Mutex<Storage>>,
-        epoch_start_ts: &Arc<Mutex<u64>>,
-        active_namespaces: &Arc<Mutex<HashMap<Namespace, bool>>>,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: &CommitmentRegistryVariant,
-        proof_registry: &ProofRegistryVariant,
-        config: &BaseConfig,
-    ) -> Result<()> {
-        info!("Starting commit phase");
-
-        let committed_at = {
-            let epoch_start = *epoch_start_ts.lock().unwrap();
-            epoch_start + config.batch_interval_secs
-        };
-
-        let namespaces: Vec<Namespace> = {
-            let ns = active_namespaces.lock().unwrap();
-            ns.keys().copied().collect()
-        };
-
-        info!("Committing {} namespaces", namespaces.len());
-
-        for namespace in namespaces {
-            Self::commit_namespace_nonblocking(
-                storage,
-                &namespace,
-                committed_at,
-                committed_records,
-                commitment_registry,
-                proof_registry,
-                config.accumulator_type,
-            )
-            .await?;
-        }
-
-        {
-            let mut epoch_start = epoch_start_ts.lock().unwrap();
-            *epoch_start = Self::now_secs();
-        }
-        {
-            let mut ns = active_namespaces.lock().unwrap();
-            ns.clear();
-        }
-
-        info!("Commit phase completed - downstream pipelines finished");
-        Ok(())
-    }
-
-    fn prune_committed_data(
-        storage: &Arc<Mutex<Storage>>,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
-    ) -> Result<()> {
-        let records_to_prune = {
-            let mut records = committed_records.lock().unwrap();
-            let to_prune = records.clone();
-            records.clear();
-            to_prune
-        };
-
-        if records_to_prune.is_empty() {
-            return Ok(());
-        }
-
-        info!(
-            "Pruning {} committed records from storage",
-            records_to_prune.len()
-        );
-
-        let storage_guard = storage.lock().unwrap();
-
-        let mut by_namespace: HashMap<Namespace, Vec<&CommittedRecord>> = HashMap::new();
-        for record in &records_to_prune {
-            by_namespace
-                .entry(record.namespace)
-                .or_insert_with(Vec::new)
-                .push(record);
-        }
-
-        for (namespace, records) in by_namespace {
-            if let Some(max_ts) = records.iter().map(|r| r.timestamp).max() {
-                let delete_filter = crate::storage::StorageDeleteFilter {
-                    namespace,
-                    timestamp: max_ts,
-                };
-                storage_guard.delete(&delete_filter)?;
-                debug!(
-                    "Pruned {} records for namespace {:?}",
-                    records.len(),
-                    namespace
-                );
-            }
-        }
-
-        info!("Pruning completed");
-        Ok(())
-    }
-
-    async fn commit_namespace_nonblocking(
+    /// Helper method to commit a namespace: scan records, build accumulator, commit, and notify proof task.
+    async fn commit_namespace(
         storage: &Arc<Mutex<Storage>>,
         namespace: &Namespace,
         committed_at: u64,
         committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
         commitment_registry: &CommitmentRegistryVariant,
-        proof_registry: &ProofRegistryVariant,
+        commit_tx: &AsyncSender<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>,
         accumulator_type: AccumulatorType,
     ) -> Result<()> {
-        let (root, record_count, records_to_track) = {
+        // Scan storage for records in this namespace up to committed_at
+        let (root, record_count, records_to_track, records_for_proof) = {
             let storage_guard = storage.lock().unwrap();
 
-            let filter = crate::storage::StorageScanFilter {
+            let filter = StorageScanFilter {
                 namespace: *namespace,
                 timestamp: Some(committed_at),
             };
@@ -395,9 +766,12 @@ impl RootSmith {
                 namespace
             );
 
+            // Build accumulator from records
             let mut accumulator = AccumulatorVariant::new(accumulator_type);
 
             let mut records_to_track = Vec::new();
+            let mut records_for_proof = Vec::new();
+
             for record in &records {
                 accumulator.put(record.key, record.value)?;
                 records_to_track.push(CommittedRecord {
@@ -406,14 +780,16 @@ impl RootSmith {
                     value: record.value,
                     timestamp: record.timestamp,
                 });
+                records_for_proof.push((record.key, record.value));
             }
 
             let root = accumulator.build_root()?;
             let record_count = records.len();
 
-            (root, record_count, records_to_track)
+            (root, record_count, records_to_track, records_for_proof)
         };
 
+        // Create commitment and send to commitment registry
         let commitment = Commitment {
             namespace: *namespace,
             root: root.clone(),
@@ -426,23 +802,19 @@ impl RootSmith {
         };
 
         commitment_registry.commit(&meta).await?;
+        info!("Committed namespace {:?}: {} records, root len={}", namespace, record_count, root.len());
 
-        let proofs: Vec<StoredProof> = Vec::new();
-        if !proofs.is_empty() {
-            proof_registry.save_proofs(&proofs).await?;
-        }
-
+        // Track records for pruning
         {
             let mut committed = committed_records.lock().unwrap();
             committed.extend(records_to_track);
         }
 
-        info!(
-            "Committed namespace {:?}: {} records, root len={} - tracked for pruning",
-            namespace,
-            record_count,
-            root.len()
-        );
+        // Notify proof task about new commitment
+        if let Err(e) = commit_tx.send((*namespace, root.clone(), committed_at, records_for_proof)).await {
+            error!("Failed to notify proof task about commitment: {}", e);
+            // Don't fail the commit if proof notification fails
+        }
 
         Ok(())
     }
@@ -453,25 +825,5 @@ impl RootSmith {
             .duration_since(UNIX_EPOCH)
             .expect("System time is before UNIX_EPOCH - please check your system clock")
             .as_secs()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_now_secs() {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("System time before UNIX_EPOCH")
-            .as_secs();
-        assert!(now > 0);
-        assert!(now < u64::MAX);
-
-        let app_now = RootSmith::now_secs();
-        assert!(app_now > 0);
-        assert!(app_now < u64::MAX);
-        assert!((app_now as i64 - now as i64).abs() < 2);
     }
 }

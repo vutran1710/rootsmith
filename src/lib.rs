@@ -1,9 +1,11 @@
 // Library exports for testing and external use
 
+pub mod archive;
 pub mod commitment_registry;
 pub mod config;
 pub mod crypto;
 pub mod feature_select;
+pub mod proof_delivery;
 pub mod proof_registry;
 pub mod rootsmith;
 pub mod storage;
@@ -18,14 +20,19 @@ pub use config::{
 };
 pub use rootsmith::RootSmith;
 pub use storage::Storage;
-pub use traits::{Accumulator, CommitmentRegistry, ProofRegistry, UpstreamConnector};
+pub use traits::{
+    Accumulator, ArchiveData, ArchiveFilter, ArchiveStorage, CommitmentRegistry, ProofDelivery,
+    ProofRegistry, UpstreamConnector,
+};
 pub use types::{
     BatchCommitmentMeta, BatchOutput, Commitment, CommitmentFilterOptions, IncomingRecord, Key32,
     Namespace, StoredProof,
 };
 
 // Re-export variant enums for convenience
+pub use archive::{ArchiveStorageVariant, MockArchive};
 pub use commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
 pub use crypto::AccumulatorVariant;
+pub use proof_delivery::{MockDelivery, ProofDeliveryVariant};
 pub use proof_registry::{MockProofRegistry, ProofRegistryVariant};
 pub use upstream::UpstreamVariant;
