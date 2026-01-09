@@ -18,7 +18,7 @@ pub mod upstream;
 pub use config::{
     AccumulatorType, BaseConfig, CommitmentRegistryType, ProofRegistryType, UpstreamType,
 };
-pub use rootsmith::RootSmith;
+pub use rootsmith::{CommittedRecord, EpochPhase, RootSmith};
 pub use storage::Storage;
 pub use traits::{
     Accumulator, ArchiveData, ArchiveFilter, ArchiveStorage, CommitmentRegistry, ProofDelivery,
