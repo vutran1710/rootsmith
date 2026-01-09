@@ -169,15 +169,13 @@ impl RootSmith {
                 let span = span!(Level::INFO, "upstream_task");
                 let _enter = span.enter();
 
-                info!("Starting upstream connector: {}", upstream.name());
-
-                if let Err(e) = upstream.open(async_tx).await {
+                match Self::run_upstream_task(upstream, async_tx).await {
+                    Ok(_) => Ok::<(), anyhow::Error>(()),
+                    Err(e) => {
                     error!("Upstream connector failed: {}", e);
-                    return Err(e);
+                        Err(e)
+                    }
                 }
-
-                info!("Upstream connector finished");
-                Ok::<(), anyhow::Error>(())
             })
         };
 
@@ -220,71 +218,23 @@ impl RootSmith {
 
                 info!("Commit task started (batch_interval_secs={})", config_clone.batch_interval_secs);
 
-                loop {
-                    // Check if it's time to commit
-                    let should_commit = {
-                        let epoch_start = *epoch_start_ts.lock().unwrap();
-                        let now = Self::now_secs();
-                        let elapsed = now.saturating_sub(epoch_start);
-                        elapsed >= config_clone.batch_interval_secs
-                    };
-
-                    if should_commit {
-                        info!("Commit phase starting");
-
-                        // Get list of active namespaces
-                        let namespaces: Vec<Namespace> = {
-                            let ns = active_namespaces.lock().unwrap();
-                            ns.keys().copied().collect()
-                        };
-
-                        if !namespaces.is_empty() {
-                            let committed_at = {
-                                let epoch_start = *epoch_start_ts.lock().unwrap();
-                                epoch_start + config_clone.batch_interval_secs
-                            };
-
-                            info!("Committing {} namespaces", namespaces.len());
-
-                            // Commit each namespace
-                            for namespace in namespaces {
-                                let registry = commitment_registry.lock().await;
-                                match Self::commit_namespace(
-                                    &storage,
-                                    &namespace,
-                                    committed_at,
-                                    &committed_records,
-                                    &*registry,
-                                    &commit_tx,
-                                    config_clone.accumulator_type,
-                                ).await {
-                                    Ok(_) => {
-                                        debug!("Committed namespace {:?}", namespace);
-                                    }
-                                    Err(e) => {
-                                        error!("Failed to commit namespace {:?}: {}", namespace, e);
-                                    }
-                                }
-                            }
-
-                            // Reset epoch and clear active namespaces
-                            {
-                                let mut epoch_start = epoch_start_ts.lock().unwrap();
-                                *epoch_start = Self::now_secs();
-                            }
-                            {
-                                let mut ns = active_namespaces.lock().unwrap();
-                                ns.clear();
-                            }
-
-                            info!("Commit phase completed");
-                        } else {
-                            debug!("No active namespaces to commit");
-                            // Still update epoch start to avoid spinning
-                            {
-                                let mut epoch_start = epoch_start_ts.lock().unwrap();
-                                *epoch_start = Self::now_secs();
-                            }
+        loop {
+                    // Process commit cycle
+                    match Self::process_commit_cycle(
+                    &epoch_start_ts,
+                    &active_namespaces,
+                        &storage,
+                    &committed_records,
+                    &commitment_registry,
+                        &commit_tx,
+                        config_clone.batch_interval_secs,
+                        config_clone.accumulator_type,
+                    ).await {
+                        Ok(_) => {
+                            // Commit cycle processed successfully
+                        }
+                        Err(e) => {
+                            error!("Error in commit cycle: {}", e);
                         }
                     }
 
@@ -292,6 +242,7 @@ impl RootSmith {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
                 // This will never be reached but satisfies return type
+                #[allow(unreachable_code)]
                 Ok::<(), anyhow::Error>(())
             })
         };
@@ -315,69 +266,21 @@ impl RootSmith {
 
                 // Listen for new commitments from commit task
                 while let Ok((namespace, root, committed_at, records)) = commit_rx.recv().await {
-                    info!("Generating proofs for namespace {:?} with {} records", namespace, records.len());
-
-                    // Build accumulator from committed records
-                    let mut accumulator = AccumulatorVariant::new(config_clone.accumulator_type);
-                    for (key, value) in &records {
-                        if let Err(e) = accumulator.put(*key, *value) {
-                            error!("Failed to insert key into accumulator: {}", e);
-                            continue;
+                    match Self::process_proof_generation(
+                        namespace,
+                        root,
+                        committed_at,
+                        records,
+                    &proof_registry,
+                        &proof_delivery_tx,
+                        config_clone.accumulator_type,
+                    ).await {
+                        Ok(count) => {
+                            debug!("Generated {} proofs for namespace {:?}", count, namespace);
                         }
-                    }
-
-                    // Generate proofs for all records
-                    let mut stored_proofs = Vec::new();
-                    for (key, value) in &records {
-                        match accumulator.prove(key) {
-                            Ok(Some(proof)) => {
-                                // Serialize proof to bytes
-                                let proof_bytes = match serde_json::to_vec(&proof) {
-                                    Ok(bytes) => bytes,
-                                    Err(e) => {
-                                        error!("Failed to serialize proof: {}", e);
-                                        continue;
-                                    }
-                                };
-
-                                let stored_proof = StoredProof {
-                                    root: root.clone(),
-                                    proof: proof_bytes,
-                                    key: *key,
-                                    meta: serde_json::json!({
-                                        "namespace": hex::encode(namespace),
-                                        "committed_at": committed_at,
-                                    }),
-                                };
-                                stored_proofs.push(stored_proof);
-                            }
-                            Ok(None) => {
-                                debug!("No proof available for key {:?}", key);
-                            }
-                            Err(e) => {
-                                error!("Failed to generate proof for key {:?}: {}", key, e);
-                            }
+                        Err(e) => {
+                            error!("Failed to process proof generation for namespace {:?}: {}", namespace, e);
                         }
-                    }
-
-                    // Save proofs to proof registry
-                    if !stored_proofs.is_empty() {
-                        let registry = proof_registry.lock().await;
-                        match registry.save_proofs(&stored_proofs).await {
-                            Ok(_) => {
-                                info!("Saved {} proofs for namespace {:?}", stored_proofs.len(), namespace);
-                                
-                                // Notify delivery task about saved proofs
-                                if let Err(e) = proof_delivery_tx.send(stored_proofs.clone()).await {
-                                    error!("Failed to send proofs to delivery task: {}", e);
-                                }
-                            }
-                            Err(e) => {
-                                error!("Failed to save proofs for namespace {:?}: {}", namespace, e);
-                            }
-                        }
-                    } else {
-                        debug!("No proofs to save for namespace {:?}", namespace);
                     }
                 }
 
@@ -445,7 +348,7 @@ impl RootSmith {
             
             tokio::spawn(async move {
                 let span = span!(Level::INFO, "db_prune_task");
-                let _enter = span.enter();
+                    let _enter = span.enter();
 
                 info!("DB prune task started");
 
@@ -579,8 +482,8 @@ impl RootSmith {
                                 Ok(recs) => recs,
                                 Err(e) => {
                                     error!("Failed to scan storage for namespace: {}", e);
-                                    continue;
-                                }
+                    continue;
+                }
                             }
                         };
 
@@ -733,6 +636,183 @@ impl RootSmith {
 
         info!("RootSmith run completed successfully");
         Ok(())
+    }
+
+    /// Process a single commit cycle: check if commit is needed, commit all active namespaces, and reset epoch.
+    /// Returns true if a commit was performed, false otherwise.
+    ///
+    /// This method is public for testing purposes. In production, it's called from `run()`.
+    pub async fn process_commit_cycle(
+        epoch_start_ts: &Arc<Mutex<u64>>,
+        active_namespaces: &Arc<Mutex<HashMap<Namespace, bool>>>,
+        storage: &Arc<Mutex<Storage>>,
+        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
+        commitment_registry: &Arc<tokio::sync::Mutex<CommitmentRegistryVariant>>,
+        commit_tx: &AsyncSender<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>,
+        batch_interval_secs: u64,
+        accumulator_type: AccumulatorType,
+    ) -> Result<bool> {
+        // Check if it's time to commit
+        let should_commit = {
+            let epoch_start = *epoch_start_ts.lock().unwrap();
+            let now = Self::now_secs();
+            let elapsed = now.saturating_sub(epoch_start);
+            elapsed >= batch_interval_secs
+        };
+
+        if !should_commit {
+            return Ok(false);
+        }
+
+        info!("Commit phase starting");
+
+        // Get list of active namespaces
+        let namespaces: Vec<Namespace> = {
+            let ns = active_namespaces.lock().unwrap();
+            ns.keys().copied().collect()
+        };
+
+        if !namespaces.is_empty() {
+            let committed_at = {
+                let epoch_start = *epoch_start_ts.lock().unwrap();
+                epoch_start + batch_interval_secs
+        };
+
+        info!("Committing {} namespaces", namespaces.len());
+
+            // Commit each namespace
+        for namespace in namespaces {
+                let registry = commitment_registry.lock().await;
+                match Self::commit_namespace(
+                storage,
+                &namespace,
+                committed_at,
+                committed_records,
+                    &*registry,
+                    commit_tx,
+                    accumulator_type,
+                ).await {
+                    Ok(_) => {
+                        debug!("Committed namespace {:?}", namespace);
+                    }
+                    Err(e) => {
+                        error!("Failed to commit namespace {:?}: {}", namespace, e);
+                    }
+                }
+            }
+
+            // Reset epoch and clear active namespaces
+        {
+            let mut epoch_start = epoch_start_ts.lock().unwrap();
+            *epoch_start = Self::now_secs();
+        }
+        {
+            let mut ns = active_namespaces.lock().unwrap();
+            ns.clear();
+        }
+
+            info!("Commit phase completed");
+        } else {
+            debug!("No active namespaces to commit");
+            // Still update epoch start to avoid spinning
+            {
+                let mut epoch_start = epoch_start_ts.lock().unwrap();
+                *epoch_start = Self::now_secs();
+            }
+        }
+
+        Ok(true)
+    }
+
+    /// Run the upstream task: open upstream connector and forward records to the data channel.
+    /// Returns Ok(()) on successful completion, or an error if the upstream connector fails.
+    ///
+    /// This method is public for testing purposes. In production, it's called from `run()`.
+    pub async fn run_upstream_task(
+        mut upstream: UpstreamVariant,
+        data_tx: AsyncSender<IncomingRecord>,
+    ) -> Result<()> {
+        info!("Starting upstream connector: {}", upstream.name());
+
+        upstream.open(data_tx).await?;
+
+        info!("Upstream connector finished");
+        Ok(())
+    }
+
+    /// Process proof generation for a committed batch: build accumulator, generate proofs, save to registry, and notify delivery.
+    /// Returns the number of proofs generated.
+    ///
+    /// This method is public for testing purposes. In production, it's called from `run()`.
+    pub async fn process_proof_generation(
+        namespace: Namespace,
+        root: Vec<u8>,
+        committed_at: u64,
+        records: Vec<(Key32, Value32)>,
+        proof_registry: &Arc<tokio::sync::Mutex<ProofRegistryVariant>>,
+        proof_delivery_tx: &AsyncSender<Vec<StoredProof>>,
+        accumulator_type: AccumulatorType,
+    ) -> Result<usize> {
+        info!("Generating proofs for namespace {:?} with {} records", namespace, records.len());
+
+        // Build accumulator from committed records
+        let mut accumulator = AccumulatorVariant::new(accumulator_type);
+        for (key, value) in &records {
+            if let Err(e) = accumulator.put(*key, *value) {
+                error!("Failed to insert key into accumulator: {}", e);
+                continue;
+            }
+        }
+
+        // Generate proofs for all records
+        let mut stored_proofs = Vec::new();
+        for (key, _value) in &records {
+            match accumulator.prove(key) {
+                Ok(Some(proof)) => {
+                    // Serialize proof to bytes
+                    let proof_bytes = match serde_json::to_vec(&proof) {
+                        Ok(bytes) => bytes,
+                        Err(e) => {
+                            error!("Failed to serialize proof: {}", e);
+                            continue;
+                        }
+                    };
+
+                    let stored_proof = StoredProof {
+                        root: root.clone(),
+                        proof: proof_bytes,
+                        key: *key,
+                        meta: serde_json::json!({
+                            "namespace": hex::encode(namespace),
+                            "committed_at": committed_at,
+                        }),
+                    };
+                    stored_proofs.push(stored_proof);
+                }
+                Ok(None) => {
+                    debug!("No proof available for key {:?}", key);
+                }
+                Err(e) => {
+                    error!("Failed to generate proof for key {:?}: {}", key, e);
+                }
+            }
+        }
+
+        // Save proofs to proof registry
+        let proof_count = stored_proofs.len();
+        if !stored_proofs.is_empty() {
+            let registry = proof_registry.lock().await;
+            registry.save_proofs(&stored_proofs).await?;
+            info!("Saved {} proofs for namespace {:?}", stored_proofs.len(), namespace);
+            
+            // Notify delivery task about saved proofs
+            proof_delivery_tx.send(stored_proofs).await
+                .map_err(|e| anyhow::anyhow!("Failed to send proofs to delivery task: {}", e))?;
+        } else {
+            debug!("No proofs to save for namespace {:?}", namespace);
+        }
+
+        Ok(proof_count)
     }
 
     /// Helper method to commit a namespace: scan records, build accumulator, commit, and notify proof task.

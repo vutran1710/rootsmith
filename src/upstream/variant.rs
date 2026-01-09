@@ -1,6 +1,6 @@
 use super::{
-    kafka::KafkaSource, mock::MockUpstream, mqtt::MqttSource, noop::NoopUpstream, sqs::SqsSource,
-    websocket::WebSocketSource,
+    http::HttpSource, kafka::KafkaSource, mock::MockUpstream, mqtt::MqttSource,
+    noop::NoopUpstream, sqs::SqsSource, websocket::WebSocketSource,
 };
 use crate::config::UpstreamType;
 use crate::traits::UpstreamConnector;
@@ -11,6 +11,7 @@ use kanal::AsyncSender;
 
 /// Enum representing all possible upstream connector implementations.
 pub enum UpstreamVariant {
+    Http(HttpSource),
     WebSocket(WebSocketSource),
     Kafka(KafkaSource),
     Sqs(SqsSource),
@@ -23,6 +24,9 @@ impl UpstreamVariant {
     /// Create a new upstream connector instance based on the specified type.
     pub fn new(upstream_type: UpstreamType) -> Self {
         match upstream_type {
+            UpstreamType::Http => {
+                UpstreamVariant::Http(HttpSource::new("127.0.0.1:8080".to_string()))
+            }
             UpstreamType::WebSocket => {
                 UpstreamVariant::WebSocket(WebSocketSource::new("ws://localhost:8080".to_string()))
             }
@@ -48,6 +52,7 @@ impl UpstreamVariant {
 impl UpstreamConnector for UpstreamVariant {
     fn name(&self) -> &'static str {
         match self {
+            UpstreamVariant::Http(inner) => inner.name(),
             UpstreamVariant::WebSocket(inner) => inner.name(),
             UpstreamVariant::Kafka(inner) => inner.name(),
             UpstreamVariant::Sqs(inner) => inner.name(),
@@ -59,6 +64,7 @@ impl UpstreamConnector for UpstreamVariant {
 
     async fn open(&mut self, tx: AsyncSender<IncomingRecord>) -> Result<()> {
         match self {
+            UpstreamVariant::Http(inner) => inner.open(tx).await,
             UpstreamVariant::WebSocket(inner) => inner.open(tx).await,
             UpstreamVariant::Kafka(inner) => inner.open(tx).await,
             UpstreamVariant::Sqs(inner) => inner.open(tx).await,
@@ -70,6 +76,7 @@ impl UpstreamConnector for UpstreamVariant {
 
     async fn close(&mut self) -> Result<()> {
         match self {
+            UpstreamVariant::Http(inner) => inner.close().await,
             UpstreamVariant::WebSocket(inner) => inner.close().await,
             UpstreamVariant::Kafka(inner) => inner.close().await,
             UpstreamVariant::Sqs(inner) => inner.close().await,

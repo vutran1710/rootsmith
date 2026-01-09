@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum UpstreamType {
+    /// HTTP server upstream.
+    Http,
     /// WebSocket upstream.
     WebSocket,
     /// Kafka upstream.
