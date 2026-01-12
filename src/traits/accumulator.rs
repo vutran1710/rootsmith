@@ -1,6 +1,9 @@
-use super::Leaf;
-use crate::types::{Key32, Proof, Value32};
 use anyhow::Result;
+
+use super::Leaf;
+use crate::types::Key32;
+use crate::types::Proof;
+use crate::types::Value32;
 
 /// Stateful cryptographic accumulator.
 ///

@@ -1,11 +1,13 @@
-use super::{
-    file::FileDelivery, kafka::KafkaDelivery, mock::MockDelivery, noop::NoopDelivery,
-    webhook::WebhookDelivery,
-};
-use crate::traits::ProofDelivery;
-use crate::types::StoredProof;
 use anyhow::Result;
 use async_trait::async_trait;
+
+use super::file::FileDelivery;
+use super::kafka::KafkaDelivery;
+use super::mock::MockDelivery;
+use super::noop::NoopDelivery;
+use super::webhook::WebhookDelivery;
+use crate::traits::ProofDelivery;
+use crate::types::StoredProof;
 
 /// Enum representing all possible proof delivery implementations.
 pub enum ProofDeliveryVariant {
@@ -68,4 +70,3 @@ impl ProofDelivery for ProofDeliveryVariant {
         }
     }
 }
-

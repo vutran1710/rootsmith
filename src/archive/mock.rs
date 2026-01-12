@@ -1,8 +1,13 @@
-use crate::traits::{ArchiveData, ArchiveFilter, ArchiveStorage};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use anyhow::Result;
 use async_trait::async_trait;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+
+use crate::traits::ArchiveData;
+use crate::traits::ArchiveFilter;
+use crate::traits::ArchiveStorage;
 
 /// Mock archive storage for testing.
 /// Stores archived data in memory with auto-generated IDs.
@@ -57,8 +62,11 @@ impl ArchiveStorage for MockArchive {
             format!("archive_{:08}", id)
         };
 
-        self.archives.lock().unwrap().insert(id.clone(), data.clone());
-        
+        self.archives
+            .lock()
+            .unwrap()
+            .insert(id.clone(), data.clone());
+
         tracing::debug!("MockArchive: archived data with ID {}", id);
         Ok(id)
     }
@@ -80,7 +88,7 @@ impl ArchiveStorage for MockArchive {
 
     async fn query(&self, filter: &ArchiveFilter) -> Result<Vec<String>> {
         let archives = self.archives.lock().unwrap();
-        
+
         // Simple filtering - could be enhanced
         let matching_ids: Vec<String> = archives
             .iter()
@@ -111,4 +119,3 @@ impl ArchiveStorage for MockArchive {
         Ok(archives.remove(archive_id).is_some())
     }
 }
-

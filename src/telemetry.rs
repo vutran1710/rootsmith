@@ -1,4 +1,5 @@
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 /// Initialize telemetry with tracing and logging.
 /// OpenTelemetry tracing is integrated via the tracing framework.

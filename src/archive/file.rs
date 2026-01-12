@@ -1,7 +1,11 @@
-use crate::traits::{ArchiveData, ArchiveFilter, ArchiveStorage};
+use std::path::PathBuf;
+
 use anyhow::Result;
 use async_trait::async_trait;
-use std::path::PathBuf;
+
+use crate::traits::ArchiveData;
+use crate::traits::ArchiveFilter;
+use crate::traits::ArchiveStorage;
 
 /// File system-based archive storage.
 /// Archives data to the local file system as compressed JSON files.
@@ -26,16 +30,13 @@ impl ArchiveStorage for FileArchive {
         let filename = format!("{}.json", archive_id);
         let filepath = self.directory.join(filename);
 
-        tracing::info!(
-            "File archive: would write data to {:?}",
-            filepath
-        );
+        tracing::info!("File archive: would write data to {:?}", filepath);
 
         // TODO: Implement actual file writing
         // Example:
         // tokio::fs::create_dir_all(&self.directory).await?;
         // let json = serde_json::to_string_pretty(data)?;
-        // 
+        //
         // // Optionally compress with gzip
         // use flate2::write::GzEncoder;
         // use flate2::Compression;
@@ -43,7 +44,7 @@ impl ArchiveStorage for FileArchive {
         // let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
         // encoder.write_all(json.as_bytes())?;
         // let compressed = encoder.finish()?;
-        // 
+        //
         // tokio::fs::write(&filepath, compressed).await?;
 
         Ok(archive_id)
@@ -68,26 +69,23 @@ impl ArchiveStorage for FileArchive {
         let filename = format!("{}.json", archive_id);
         let filepath = self.directory.join(filename);
 
-        tracing::info!(
-            "File archive: would read data from {:?}",
-            filepath
-        );
+        tracing::info!("File archive: would read data from {:?}", filepath);
 
         // TODO: Implement actual file reading
         // Example:
         // if !filepath.exists() {
         //     return Ok(None);
         // }
-        // 
+        //
         // let compressed = tokio::fs::read(&filepath).await?;
-        // 
+        //
         // // Decompress if needed
         // use flate2::read::GzDecoder;
         // use std::io::Read;
         // let mut decoder = GzDecoder::new(&compressed[..]);
         // let mut json = String::new();
         // decoder.read_to_string(&mut json)?;
-        // 
+        //
         // let data: ArchiveData = serde_json::from_str(&json)?;
         // Ok(Some(data))
 
@@ -122,10 +120,7 @@ impl ArchiveStorage for FileArchive {
         let filename = format!("{}.json", archive_id);
         let filepath = self.directory.join(filename);
 
-        tracing::info!(
-            "File archive: would delete {:?}",
-            filepath
-        );
+        tracing::info!("File archive: would delete {:?}", filepath);
 
         // TODO: Implement actual file deletion
         // Example:
@@ -140,10 +135,7 @@ impl ArchiveStorage for FileArchive {
     }
 
     async fn open(&mut self) -> Result<()> {
-        tracing::info!(
-            "File archive: initializing directory {:?}",
-            self.directory
-        );
+        tracing::info!("File archive: initializing directory {:?}", self.directory);
 
         // TODO: Create directory if it doesn't exist
         // tokio::fs::create_dir_all(&self.directory).await?;
@@ -151,4 +143,3 @@ impl ArchiveStorage for FileArchive {
         Ok(())
     }
 }
-

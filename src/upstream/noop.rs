@@ -1,8 +1,9 @@
-use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
 use anyhow::Result;
 use async_trait::async_trait;
 use kanal::AsyncSender;
+
+use crate::traits::UpstreamConnector;
+use crate::types::IncomingRecord;
 
 /// Noop upstream connector for demonstration purposes.
 pub struct NoopUpstream;

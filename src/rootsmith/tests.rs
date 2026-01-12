@@ -3,17 +3,28 @@
 //! These tests focus on the "*_once" functions which contain pure business logic
 //! without tokio::spawn, making them easy to test.
 
-use super::core::{CommittedRecord, RootSmith};
-use crate::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
-use crate::config::{AccumulatorType, BaseConfig};
-use crate::proof_delivery::{MockDelivery, ProofDeliveryVariant};
-use crate::proof_registry::{MockProofRegistry, ProofRegistryVariant};
-use crate::storage::Storage;
-use crate::types::{IncomingRecord, Key32, Namespace, StoredProof, Value32};
-use anyhow::Result;
-use kanal::unbounded_async;
 use std::collections::HashMap;
 use std::sync::Arc;
+
+use anyhow::Result;
+use kanal::unbounded_async;
+
+use super::core::CommittedRecord;
+use super::core::RootSmith;
+use crate::commitment_registry::CommitmentRegistryVariant;
+use crate::commitment_registry::MockCommitmentRegistry;
+use crate::config::AccumulatorType;
+use crate::config::BaseConfig;
+use crate::proof_delivery::MockDelivery;
+use crate::proof_delivery::ProofDeliveryVariant;
+use crate::proof_registry::MockProofRegistry;
+use crate::proof_registry::ProofRegistryVariant;
+use crate::storage::Storage;
+use crate::types::IncomingRecord;
+use crate::types::Key32;
+use crate::types::Namespace;
+use crate::types::StoredProof;
+use crate::types::Value32;
 
 // ==================== TEST HELPERS ====================
 
@@ -36,7 +47,8 @@ fn test_value(id: u8) -> Value32 {
 }
 
 fn test_now() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::time::SystemTime;
+    use std::time::UNIX_EPOCH;
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("System time before UNIX_EPOCH")
@@ -118,9 +130,9 @@ async fn test_process_commit_cycle_not_ready() -> Result<()> {
     let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(test_now()));
     let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-    let commitment_registry = Arc::new(tokio::sync::Mutex::new(
-        CommitmentRegistryVariant::Mock(MockCommitmentRegistry::new()),
-    ));
+    let commitment_registry = Arc::new(tokio::sync::Mutex::new(CommitmentRegistryVariant::Mock(
+        MockCommitmentRegistry::new(),
+    )));
     let (commit_tx, _commit_rx) =
         unbounded_async::<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>();
 
@@ -155,9 +167,9 @@ async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
     let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(epoch_start));
     let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new())); // Empty
     let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-    let commitment_registry = Arc::new(tokio::sync::Mutex::new(
-        CommitmentRegistryVariant::Mock(MockCommitmentRegistry::new()),
-    ));
+    let commitment_registry = Arc::new(tokio::sync::Mutex::new(CommitmentRegistryVariant::Mock(
+        MockCommitmentRegistry::new(),
+    )));
     let (commit_tx, _commit_rx) =
         unbounded_async::<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>();
 
@@ -176,7 +188,10 @@ async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
     )
     .await?;
 
-    assert!(result, "Should process commit cycle even with no namespaces");
+    assert!(
+        result,
+        "Should process commit cycle even with no namespaces"
+    );
 
     // Verify epoch was reset
     let new_epoch_start = *epoch_start_ts.lock().await;
@@ -198,7 +213,7 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
     let namespace = test_namespace(1);
     let now = test_now();
     let epoch_start = now - 100; // Started 100 seconds ago
-    
+
     // Records should be timestamped BEFORE the committed_at time
     // committed_at will be epoch_start + batch_interval_secs = now - 100 + 60 = now - 40
     let committed_at = epoch_start + 60; // This is what will be used
@@ -227,9 +242,9 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
     let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let mock_registry = MockCommitmentRegistry::new();
     let registry_clone = mock_registry.clone();
-    let commitment_registry = Arc::new(tokio::sync::Mutex::new(
-        CommitmentRegistryVariant::Mock(mock_registry),
-    ));
+    let commitment_registry = Arc::new(tokio::sync::Mutex::new(CommitmentRegistryVariant::Mock(
+        mock_registry,
+    )));
     let (commit_tx, commit_rx) =
         unbounded_async::<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>();
 
@@ -265,7 +280,10 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
         }
         Err(e) => {
             // Channel error - but commit to registry should still have succeeded
-            eprintln!("Warning: Channel error {:?}, but commitment may have succeeded anyway", e);
+            eprintln!(
+                "Warning: Channel error {:?}, but commitment may have succeeded anyway",
+                e
+            );
         }
     }
 
@@ -328,11 +346,8 @@ async fn test_process_proof_generation_success() -> Result<()> {
     assert_eq!(proof_count, 3, "Should generate 3 proofs");
 
     // Wait for proofs to be sent to delivery channel
-    let proofs = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        proof_delivery_rx.recv(),
-    )
-    .await??;
+    let proofs =
+        tokio::time::timeout(std::time::Duration::from_secs(2), proof_delivery_rx.recv()).await??;
 
     assert_eq!(proofs.len(), 3, "Should receive 3 proofs");
 
@@ -378,8 +393,9 @@ async fn test_process_proof_generation_empty_records() -> Result<()> {
 async fn test_deliver_once_success() -> Result<()> {
     let mock_delivery = MockDelivery::new();
     let delivery_clone = mock_delivery.clone();
-    let proof_delivery =
-        Arc::new(tokio::sync::Mutex::new(ProofDeliveryVariant::Mock(mock_delivery)));
+    let proof_delivery = Arc::new(tokio::sync::Mutex::new(ProofDeliveryVariant::Mock(
+        mock_delivery,
+    )));
 
     let proofs = vec![
         StoredProof {
@@ -409,8 +425,9 @@ async fn test_deliver_once_success() -> Result<()> {
 async fn test_deliver_once_empty_batch() -> Result<()> {
     let mock_delivery = MockDelivery::new();
     let delivery_clone = mock_delivery.clone();
-    let proof_delivery =
-        Arc::new(tokio::sync::Mutex::new(ProofDeliveryVariant::Mock(mock_delivery)));
+    let proof_delivery = Arc::new(tokio::sync::Mutex::new(ProofDeliveryVariant::Mock(
+        mock_delivery,
+    )));
 
     let proofs: Vec<StoredProof> = vec![];
 
@@ -543,4 +560,3 @@ async fn test_prune_once_multiple_namespaces() -> Result<()> {
 
     Ok(())
 }
-

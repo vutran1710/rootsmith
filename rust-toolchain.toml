@@ -1,0 +1,7 @@
+[toolchain]
+# Use the nightly channel for advanced rustfmt features
+# Required for imports_granularity and group_imports features
+channel = "nightly"
+
+# Specify components needed for development
+components = ["rustfmt", "clippy"]

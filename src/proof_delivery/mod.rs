@@ -11,4 +11,3 @@ pub use mock::MockDelivery;
 pub use noop::NoopDelivery;
 pub use variant::ProofDeliveryVariant;
 pub use webhook::WebhookDelivery;
-

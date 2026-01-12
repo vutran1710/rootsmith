@@ -1,0 +1,27 @@
+# Rustfmt configuration for rootsmith project
+# This configuration enforces explicit imports instead of grouped imports
+# Note: Some features require nightly channel
+
+# Import granularity: "Item" means each import gets its own use statement
+# This transforms: use some_mod::{mod1, mod2};
+# Into: use some_mod::mod1;
+#       use some_mod::mod2;
+imports_granularity = "Item"
+
+# Group imports by module (std, external crates, then internal)
+group_imports = "StdExternalCrate"
+
+# Use field init shorthand if possible
+use_field_init_shorthand = true
+
+# Reorder imports alphabetically
+reorder_imports = true
+
+# Reorder modules alphabetically
+reorder_modules = true
+
+# Maximum line width
+max_width = 100
+
+# Edition
+edition = "2021"

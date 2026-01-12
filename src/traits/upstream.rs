@@ -1,7 +1,8 @@
-use crate::types::IncomingRecord;
 use anyhow::Result;
 use async_trait::async_trait;
 use kanal::AsyncSender;
+
+use crate::types::IncomingRecord;
 
 /// Trait for upstream data sources (websocket, Kafka, SQS, MQTT, etc.).
 ///

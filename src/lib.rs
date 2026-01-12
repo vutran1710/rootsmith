@@ -15,24 +15,39 @@ pub mod types;
 pub mod upstream;
 
 // Re-export commonly used types and traits
-pub use config::{
-    AccumulatorType, BaseConfig, CommitmentRegistryType, ProofRegistryType, UpstreamType,
-};
-pub use rootsmith::{CommittedRecord, EpochPhase, RootSmith};
-pub use storage::Storage;
-pub use traits::{
-    Accumulator, ArchiveData, ArchiveFilter, ArchiveStorage, CommitmentRegistry, ProofDelivery,
-    ProofRegistry, UpstreamConnector,
-};
-pub use types::{
-    BatchCommitmentMeta, BatchOutput, Commitment, CommitmentFilterOptions, IncomingRecord, Key32,
-    Namespace, StoredProof,
-};
-
 // Re-export variant enums for convenience
-pub use archive::{ArchiveStorageVariant, MockArchive};
-pub use commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
+pub use archive::ArchiveStorageVariant;
+pub use archive::MockArchive;
+pub use commitment_registry::CommitmentRegistryVariant;
+pub use commitment_registry::MockCommitmentRegistry;
+pub use config::AccumulatorType;
+pub use config::BaseConfig;
+pub use config::CommitmentRegistryType;
+pub use config::ProofRegistryType;
+pub use config::UpstreamType;
 pub use crypto::AccumulatorVariant;
-pub use proof_delivery::{MockDelivery, ProofDeliveryVariant};
-pub use proof_registry::{MockProofRegistry, ProofRegistryVariant};
+pub use proof_delivery::MockDelivery;
+pub use proof_delivery::ProofDeliveryVariant;
+pub use proof_registry::MockProofRegistry;
+pub use proof_registry::ProofRegistryVariant;
+pub use rootsmith::CommittedRecord;
+pub use rootsmith::EpochPhase;
+pub use rootsmith::RootSmith;
+pub use storage::Storage;
+pub use traits::Accumulator;
+pub use traits::ArchiveData;
+pub use traits::ArchiveFilter;
+pub use traits::ArchiveStorage;
+pub use traits::CommitmentRegistry;
+pub use traits::ProofDelivery;
+pub use traits::ProofRegistry;
+pub use traits::UpstreamConnector;
+pub use types::BatchCommitmentMeta;
+pub use types::BatchOutput;
+pub use types::Commitment;
+pub use types::CommitmentFilterOptions;
+pub use types::IncomingRecord;
+pub use types::Key32;
+pub use types::Namespace;
+pub use types::StoredProof;
 pub use upstream::UpstreamVariant;
