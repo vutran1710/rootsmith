@@ -13,7 +13,7 @@ use crate::types::{IncomingRecord, Key32, Namespace, StoredProof, Value32};
 use anyhow::Result;
 use kanal::unbounded_async;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 // ==================== TEST HELPERS ====================
 
@@ -58,17 +58,17 @@ fn test_record(namespace_id: u8, key_id: u8, value_id: u8) -> IncomingRecord {
 async fn test_storage_write_once_success() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let storage = Storage::open(temp_dir.path().to_str().unwrap())?;
-    let storage = Arc::new(Mutex::new(storage));
-    let active_namespaces = Arc::new(Mutex::new(HashMap::new()));
+    let storage = Arc::new(tokio::sync::Mutex::new(storage));
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     let record = test_record(1, 1, 1);
 
     // Write once
-    RootSmith::storage_write_once(&storage, &active_namespaces, &record)?;
+    RootSmith::storage_write_once(&storage, &active_namespaces, &record).await?;
 
     // Verify record was persisted
     {
-        let db = storage.lock().unwrap();
+        let db = storage.lock().await;
         let retrieved = db.get(&record.namespace, &record.key, None)?;
         assert!(retrieved.is_some());
         assert_eq!(retrieved.unwrap().value, record.value);
@@ -76,7 +76,7 @@ async fn test_storage_write_once_success() -> Result<()> {
 
     // Verify namespace was marked active
     {
-        let active = active_namespaces.lock().unwrap();
+        let active = active_namespaces.lock().await;
         assert!(active.contains_key(&record.namespace));
     }
 
@@ -87,18 +87,18 @@ async fn test_storage_write_once_success() -> Result<()> {
 async fn test_storage_write_once_multiple_namespaces() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let storage = Storage::open(temp_dir.path().to_str().unwrap())?;
-    let storage = Arc::new(Mutex::new(storage));
-    let active_namespaces = Arc::new(Mutex::new(HashMap::new()));
+    let storage = Arc::new(tokio::sync::Mutex::new(storage));
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
 
     let record1 = test_record(1, 1, 1);
     let record2 = test_record(2, 1, 1);
 
-    RootSmith::storage_write_once(&storage, &active_namespaces, &record1)?;
-    RootSmith::storage_write_once(&storage, &active_namespaces, &record2)?;
+    RootSmith::storage_write_once(&storage, &active_namespaces, &record1).await?;
+    RootSmith::storage_write_once(&storage, &active_namespaces, &record2).await?;
 
     // Both namespaces should be active
     {
-        let active = active_namespaces.lock().unwrap();
+        let active = active_namespaces.lock().await;
         assert_eq!(active.len(), 2);
         assert!(active.contains_key(&record1.namespace));
         assert!(active.contains_key(&record2.namespace));
@@ -113,11 +113,11 @@ async fn test_storage_write_once_multiple_namespaces() -> Result<()> {
 async fn test_process_commit_cycle_not_ready() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let storage = Storage::open(temp_dir.path().to_str().unwrap())?;
-    let storage = Arc::new(Mutex::new(storage));
+    let storage = Arc::new(tokio::sync::Mutex::new(storage));
 
-    let epoch_start_ts = Arc::new(Mutex::new(test_now()));
-    let active_namespaces = Arc::new(Mutex::new(HashMap::new()));
-    let committed_records = Arc::new(Mutex::new(Vec::new()));
+    let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(test_now()));
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let commitment_registry = Arc::new(tokio::sync::Mutex::new(
         CommitmentRegistryVariant::Mock(MockCommitmentRegistry::new()),
     ));
@@ -148,13 +148,13 @@ async fn test_process_commit_cycle_not_ready() -> Result<()> {
 async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let storage = Storage::open(temp_dir.path().to_str().unwrap())?;
-    let storage = Arc::new(Mutex::new(storage));
+    let storage = Arc::new(tokio::sync::Mutex::new(storage));
 
     let now = test_now();
     let epoch_start = now - 100; // Started 100 seconds ago (well past interval)
-    let epoch_start_ts = Arc::new(Mutex::new(epoch_start));
-    let active_namespaces = Arc::new(Mutex::new(HashMap::new())); // Empty
-    let committed_records = Arc::new(Mutex::new(Vec::new()));
+    let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(epoch_start));
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new())); // Empty
+    let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let commitment_registry = Arc::new(tokio::sync::Mutex::new(
         CommitmentRegistryVariant::Mock(MockCommitmentRegistry::new()),
     ));
@@ -179,7 +179,7 @@ async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
     assert!(result, "Should process commit cycle even with no namespaces");
 
     // Verify epoch was reset
-    let new_epoch_start = *epoch_start_ts.lock().unwrap();
+    let new_epoch_start = *epoch_start_ts.lock().await;
     assert!(
         new_epoch_start >= now - 1,
         "Epoch should be reset to current time"
@@ -192,7 +192,7 @@ async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
 async fn test_process_commit_cycle_with_namespace() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let storage = Storage::open(temp_dir.path().to_str().unwrap())?;
-    let storage_arc = Arc::new(Mutex::new(storage));
+    let storage_arc = Arc::new(tokio::sync::Mutex::new(storage));
 
     // Add some records to storage
     let namespace = test_namespace(1);
@@ -204,7 +204,7 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
     let committed_at = epoch_start + 60; // This is what will be used
 
     {
-        let db = storage_arc.lock().unwrap();
+        let db = storage_arc.lock().await;
         for i in 0..3 {
             let record = IncomingRecord {
                 namespace,
@@ -217,14 +217,14 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
         }
     }
 
-    let epoch_start_ts = Arc::new(Mutex::new(epoch_start));
+    let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(epoch_start));
 
     // Mark namespace as active
     let mut active_namespaces_map = HashMap::new();
     active_namespaces_map.insert(namespace, true);
-    let active_namespaces = Arc::new(Mutex::new(active_namespaces_map));
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(active_namespaces_map));
 
-    let committed_records = Arc::new(Mutex::new(Vec::new()));
+    let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let mock_registry = MockCommitmentRegistry::new();
     let registry_clone = mock_registry.clone();
     let commitment_registry = Arc::new(tokio::sync::Mutex::new(
@@ -278,14 +278,14 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
     );
 
     // Verify epoch was reset
-    let new_epoch_start = *epoch_start_ts.lock().unwrap();
+    let new_epoch_start = *epoch_start_ts.lock().await;
     assert!(
         new_epoch_start >= now - 1,
         "Epoch should be reset to current time"
     );
 
     // Verify active namespaces cleared
-    let active = active_namespaces.lock().unwrap();
+    let active = active_namespaces.lock().await;
     assert!(active.is_empty(), "Active namespaces should be cleared");
 
     Ok(())
@@ -429,10 +429,10 @@ async fn test_deliver_once_empty_batch() -> Result<()> {
 async fn test_prune_once_no_records() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let storage = Storage::open(temp_dir.path().to_str().unwrap())?;
-    let storage = Arc::new(Mutex::new(storage));
-    let committed_records = Arc::new(Mutex::new(Vec::new()));
+    let storage = Arc::new(tokio::sync::Mutex::new(storage));
+    let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
-    let pruned = RootSmith::prune_once(&storage, &committed_records)?;
+    let pruned = RootSmith::prune_once(&storage, &committed_records).await?;
 
     assert_eq!(pruned, 0, "Should prune 0 records");
 
@@ -443,14 +443,14 @@ async fn test_prune_once_no_records() -> Result<()> {
 async fn test_prune_once_with_records() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let storage = Storage::open(temp_dir.path().to_str().unwrap())?;
-    let storage_arc = Arc::new(Mutex::new(storage));
+    let storage_arc = Arc::new(tokio::sync::Mutex::new(storage));
 
     let namespace = test_namespace(1);
     let now = test_now();
 
     // Add records to storage
     {
-        let db = storage_arc.lock().unwrap();
+        let db = storage_arc.lock().await;
         for i in 0..3 {
             let record = IncomingRecord {
                 namespace,
@@ -472,16 +472,16 @@ async fn test_prune_once_with_records() -> Result<()> {
         })
         .collect();
 
-    let committed_records = Arc::new(Mutex::new(committed_records_list));
+    let committed_records = Arc::new(tokio::sync::Mutex::new(committed_records_list));
 
     // Prune
-    let pruned = RootSmith::prune_once(&storage_arc, &committed_records)?;
+    let pruned = RootSmith::prune_once(&storage_arc, &committed_records).await?;
 
     assert_eq!(pruned, 3, "Should prune 3 records");
 
     // Verify committed_records was cleared
     {
-        let committed = committed_records.lock().unwrap();
+        let committed = committed_records.lock().await;
         assert!(committed.is_empty(), "Committed records should be cleared");
     }
 
@@ -492,7 +492,7 @@ async fn test_prune_once_with_records() -> Result<()> {
 async fn test_prune_once_multiple_namespaces() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let storage = Storage::open(temp_dir.path().to_str().unwrap())?;
-    let storage_arc = Arc::new(Mutex::new(storage));
+    let storage_arc = Arc::new(tokio::sync::Mutex::new(storage));
 
     let namespace1 = test_namespace(1);
     let namespace2 = test_namespace(2);
@@ -500,7 +500,7 @@ async fn test_prune_once_multiple_namespaces() -> Result<()> {
 
     // Add records to storage
     {
-        let db = storage_arc.lock().unwrap();
+        let db = storage_arc.lock().await;
         for i in 0..2 {
             db.put(&IncomingRecord {
                 namespace: namespace1,
@@ -534,10 +534,10 @@ async fn test_prune_once_multiple_namespaces() -> Result<()> {
         });
     }
 
-    let committed_records = Arc::new(Mutex::new(committed_records_list));
+    let committed_records = Arc::new(tokio::sync::Mutex::new(committed_records_list));
 
     // Prune
-    let pruned = RootSmith::prune_once(&storage_arc, &committed_records)?;
+    let pruned = RootSmith::prune_once(&storage_arc, &committed_records).await?;
 
     assert_eq!(pruned, 4, "Should prune 4 records (2 per namespace)");
 
