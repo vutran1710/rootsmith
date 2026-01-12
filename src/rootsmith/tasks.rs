@@ -4,12 +4,342 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::types::{IncomingRecord, Key32, Namespace, StoredProof};
+use crate::archive::ArchiveStorageVariant;
+use crate::commitment_registry::CommitmentRegistryVariant;
+use crate::config::AccumulatorType;
+use crate::proof_delivery::ProofDeliveryVariant;
+use crate::proof_registry::ProofRegistryVariant;
+use crate::storage::Storage;
+use crate::types::{IncomingRecord, Key32, Namespace, StoredProof, Value32};
+use crate::upstream::UpstreamVariant;
 use anyhow::Result;
-use kanal::{unbounded_async, AsyncSender};
+use kanal::{unbounded_async, AsyncReceiver, AsyncSender};
+use tokio::task::JoinHandle;
 use tracing::{debug, error, info, span, Level};
 
 use super::core::{CommittedRecord, RootSmith};
+
+// ==================== TYPE ALIASES ====================
+
+type NamespaceMap = Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>;
+type Storage = Arc<tokio::sync::Mutex<crate::storage::Storage>>;
+type CommittedRecordsList = Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>;
+type EpochStartTs = Arc<tokio::sync::Mutex<u64>>;
+type CommitmentRegistry = Arc<tokio::sync::Mutex<CommitmentRegistryVariant>>;
+type ProofRegistry = Arc<tokio::sync::Mutex<ProofRegistryVariant>>;
+type ProofDelivery = Arc<tokio::sync::Mutex<ProofDeliveryVariant>>;
+type ArchiveStorage = Arc<tokio::sync::Mutex<ArchiveStorageVariant>>;
+
+// ==================== GENERIC TASK UTILITIES ====================
+
+/// Spawn an interval-based task that runs periodically or continuously.
+/// 
+/// If `interval` is `Some(duration)`, sleeps between iterations.
+/// If `interval` is `None`, yields with `tokio::task::yield_now()`.
+fn spawn_interval_task<F, Fut>(
+    name: &'static str,
+    interval: Option<Duration>,
+    task_fn: F,
+) -> JoinHandle<Result<()>>
+where
+    F: Fn() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<()>> + Send,
+{
+    tokio::spawn(async move {
+        let span = span!(Level::INFO, "task", name = name);
+        let _enter = span.enter();
+
+        loop {
+            match task_fn().await {
+                Ok(_) => {
+                    // Task iteration successful
+                }
+                Err(e) => {
+                    error!("Error in task {}: {}", name, e);
+                }
+            }
+
+            // Sleep or yield based on interval
+            match interval {
+                Some(duration) => tokio::time::sleep(duration).await,
+                None => tokio::task::yield_now().await,
+            }
+        }
+    })
+}
+
+/// Spawn a channel consumer task that processes messages from an AsyncReceiver.
+/// 
+/// Consumes messages from the receiver and processes them with the provided function.
+/// Handles channel closure gracefully.
+fn spawn_channel_consumer_task<T, F, Fut>(
+    name: &'static str,
+    receiver: AsyncReceiver<T>,
+    process_fn: F,
+) -> JoinHandle<Result<()>>
+where
+    T: Send + 'static,
+    F: Fn(T) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<()>> + Send,
+{
+    tokio::spawn(async move {
+        let span = span!(Level::INFO, "task", name = name);
+        let _enter = span.enter();
+
+        info!("Starting {} task", name);
+
+        while let Ok(message) = receiver.recv().await {
+            if let Err(e) = process_fn(message).await {
+                error!("Error processing message in {}: {}", name, e);
+            }
+        }
+
+        info!("{} task finished (channel closed)", name);
+        Ok(())
+    })
+}
+
+/// Spawn a one-time task that runs once and completes.
+/// 
+/// Runs the provided async function once and returns its result.
+fn spawn_oneshot_task<F, Fut>(
+    name: &'static str,
+    task_fn: F,
+) -> JoinHandle<Result<()>>
+where
+    F: FnOnce() -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<()>> + Send,
+{
+    tokio::spawn(async move {
+        let span = span!(Level::INFO, "task", name = name);
+        let _enter = span.enter();
+
+        debug!("{} task running", name);
+        task_fn().await
+    })
+}
+
+// ==================== STATELESS BUSINESS LOGIC FUNCTIONS ====================
+
+/// Process upstream data: run the upstream connector and forward records to the channel.
+async fn process_upstream(
+    mut upstream: UpstreamVariant,
+    data_tx: AsyncSender<IncomingRecord>,
+) -> Result<()> {
+    RootSmith::run_upstream_task(upstream, data_tx).await
+}
+
+/// Process storage write: consume a record from channel and persist to storage.
+async fn process_storage_write(
+    storage: &Storage,
+    active_namespaces: &NamespaceMap,
+    record: IncomingRecord,
+) -> Result<()> {
+    RootSmith::storage_write_once(storage, active_namespaces, &record).await
+}
+
+/// Process proof delivery: deliver a batch of proofs.
+async fn process_proof_delivery(
+    proof_delivery: &ProofDelivery,
+    proofs: Vec<StoredProof>,
+) -> Result<()> {
+    if proofs.is_empty() {
+        return Ok(());
+    }
+
+    info!(
+        "Delivering batch of {} proofs (first key: {:?})",
+        proofs.len(),
+        proofs.first().map(|p| hex::encode(&p.key))
+    );
+
+    RootSmith::deliver_once(proof_delivery, &proofs).await
+}
+
+/// Process DB prune cycle: prune committed records from storage.
+async fn process_db_prune(
+    storage: &Storage,
+    committed_records: &CommittedRecordsList,
+) -> Result<usize> {
+    RootSmith::prune_once(storage, committed_records).await
+}
+
+/// Process archiving cycle: archive old records and commitments.
+async fn process_archiving_cycle(
+    archive_storage: &ArchiveStorage,
+    storage: &Storage,
+    active_namespaces: &NamespaceMap,
+    commitment_registry: &CommitmentRegistry,
+    archive_threshold_secs: u64,
+) -> Result<()> {
+    let now = RootSmith::now_secs();
+    let archive_cutoff = now.saturating_sub(archive_threshold_secs);
+
+    info!(
+        "Running archiving cycle (cutoff: {} days ago, timestamp: {})",
+        archive_threshold_secs / (24 * 3600),
+        archive_cutoff
+    );
+
+    // Get list of active namespaces
+    let namespaces: Vec<Namespace> = {
+        let active = active_namespaces.lock().await;
+        active.keys().copied().collect()
+    };
+
+    if namespaces.is_empty() {
+        debug!("No active namespaces to archive");
+        return Ok(());
+    }
+
+    info!(
+        "Checking {} namespaces for archivable data",
+        namespaces.len()
+    );
+
+    // Archive old records
+    let archived_count = archive_old_records(
+        archive_storage,
+        storage,
+        &namespaces,
+        archive_cutoff,
+    )
+    .await?;
+
+    // Archive old commitments
+    let archived_commitments = archive_old_commitments(
+        archive_storage,
+        commitment_registry,
+        &namespaces,
+        archive_cutoff,
+    )
+    .await?;
+
+    // Summary logging
+    let total = archived_count + archived_commitments;
+    if total > 0 {
+        info!(
+            "Archiving cycle: {} records, {} commitments",
+            archived_count, archived_commitments
+        );
+    } else {
+        debug!("No old data to archive");
+    }
+
+    Ok(())
+}
+
+/// Archive old records from storage.
+async fn archive_old_records(
+    archive_storage: &ArchiveStorage,
+    storage: &Storage,
+    namespaces: &[Namespace],
+    archive_cutoff: u64,
+) -> Result<usize> {
+    use crate::storage::StorageScanFilter;
+    use crate::traits::{ArchiveData, ArchiveStorage as ArchiveStorageTrait};
+
+    let mut archived_count = 0;
+
+    for namespace in namespaces {
+        let filter = StorageScanFilter {
+            namespace: *namespace,
+            timestamp: Some(archive_cutoff),
+        };
+
+        let records = {
+            let db = storage.lock().await;
+            match db.scan(&filter) {
+                Ok(recs) => recs,
+                Err(e) => {
+                    error!("Failed to scan storage for namespace: {}", e);
+                    continue;
+                }
+            }
+        };
+
+        if !records.is_empty() {
+            debug!(
+                "Found {} old records in namespace to archive",
+                records.len()
+            );
+
+            // Archive records in batches
+            let batch_size = 100;
+            for chunk in records.chunks(batch_size) {
+                let archive_data: Vec<ArchiveData> =
+                    chunk.iter().map(|r| ArchiveData::Record(r.clone())).collect();
+
+                let mut archive = archive_storage.lock().await;
+                match (*archive).archive_batch(&archive_data).await {
+                    Ok(ids) => {
+                        archived_count += ids.len();
+                        debug!(
+                            "Archived {} records, IDs: {:?}",
+                            ids.len(),
+                            &ids[..ids.len().min(3)]
+                        );
+                    }
+                    Err(e) => {
+                        error!("Failed to archive batch: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(archived_count)
+}
+
+/// Archive old commitments for namespaces.
+async fn archive_old_commitments(
+    archive_storage: &ArchiveStorage,
+    commitment_registry: &CommitmentRegistry,
+    namespaces: &[Namespace],
+    archive_cutoff: u64,
+) -> Result<usize> {
+    use crate::traits::{ArchiveData, ArchiveStorage as ArchiveStorageTrait, CommitmentRegistry as CommitmentRegistryTrait};
+    use crate::types::{BatchCommitmentMeta, CommitmentFilterOptions};
+
+    let mut archived_commitments = 0;
+
+    for namespace in namespaces {
+        let filter = CommitmentFilterOptions {
+            namespace: *namespace,
+            time: archive_cutoff,
+        };
+
+        let registry = commitment_registry.lock().await;
+        let result = (*registry).get_prev_commitment(&filter).await;
+        drop(registry);
+
+        match result {
+            Ok(Some(commitment)) if commitment.committed_at <= archive_cutoff => {
+                let meta = BatchCommitmentMeta {
+                    commitment: commitment.clone(),
+                    leaf_count: 0, // Unknown - could be tracked separately
+                };
+
+                let mut archive = archive_storage.lock().await;
+                match (*archive).archive(&ArchiveData::Commitment(meta)).await {
+                    Ok(id) => {
+                        archived_commitments += 1;
+                        debug!(
+                            "Archived commitment ID: {}, timestamp: {}",
+                            id, commitment.committed_at
+                        );
+                    }
+                    Err(e) => error!("Failed to archive commitment: {}", e),
+                }
+            }
+            Ok(Some(_)) => debug!("Commitment too recent to archive"),
+            Ok(None) => debug!("No commitment found for namespace"),
+            Err(e) => error!("Failed to query commitment: {}", e),
+        }
+    }
+
+    Ok(archived_commitments)
+}
 
 impl RootSmith {
     /// Run the application: spawn all tasks and orchestrate the system.
@@ -77,7 +407,7 @@ impl RootSmith {
 
                 while let Ok(record) = data_rx.recv().await {
                     if let Err(e) =
-                        RootSmith::storage_write_once(&storage, &active_namespaces, &record)
+                        RootSmith::storage_write_once(&storage, &active_namespaces, &record).await
                     {
                         error!("Failed to write record: {}", e);
                     }
@@ -238,7 +568,7 @@ impl RootSmith {
                     // Check for committed records to prune every 5 seconds
                     tokio::time::sleep(Duration::from_secs(5)).await;
 
-                    match RootSmith::prune_once(&storage, &committed_records) {
+                    match RootSmith::prune_once(&storage, &committed_records).await {
                         Ok(count) if count > 0 => {
                             info!("Pruned {} records", count);
                         }
@@ -295,7 +625,7 @@ impl RootSmith {
 
                     // Get list of active namespaces to check for archivable data
                     let namespaces: Vec<Namespace> = {
-                        let active = active_namespaces.lock().unwrap();
+                        let active = active_namespaces.lock().await;
                         active.keys().copied().collect()
                     };
 
@@ -322,7 +652,7 @@ impl RootSmith {
                         };
 
                         let records = {
-                            let db = storage.lock().unwrap();
+                            let db = storage.lock().await;
                             match db.scan(&filter) {
                                 Ok(recs) => recs,
                                 Err(e) => {

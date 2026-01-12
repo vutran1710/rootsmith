@@ -1,7 +1,7 @@
 //! Core business logic for RootSmith - testable functions without tokio::spawn.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::archive::ArchiveStorageVariant;
@@ -62,16 +62,16 @@ pub struct RootSmith {
     pub config: BaseConfig,
 
     /// Persistent storage (RocksDB).
-    pub storage: Arc<Mutex<Storage>>,
+    pub storage: Arc<tokio::sync::Mutex<Storage>>,
 
     /// Start time of the current epoch (unix seconds).
-    pub epoch_start_ts: Arc<Mutex<u64>>,
+    pub epoch_start_ts: Arc<tokio::sync::Mutex<u64>>,
 
     /// Track active namespaces for efficient commit.
-    pub active_namespaces: Arc<Mutex<HashMap<Namespace, bool>>>,
+    pub active_namespaces: Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>,
 
     /// Track committed records for pruning in pending phase.
-    pub committed_records: Arc<Mutex<Vec<CommittedRecord>>>,
+    pub committed_records: Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>,
 }
 
 impl RootSmith {
@@ -94,10 +94,10 @@ impl RootSmith {
             proof_delivery,
             archive_storage,
             config,
-            storage: Arc::new(Mutex::new(storage)),
-            epoch_start_ts: Arc::new(Mutex::new(now)),
-            active_namespaces: Arc::new(Mutex::new(HashMap::new())),
-            committed_records: Arc::new(Mutex::new(Vec::new())),
+            storage: Arc::new(tokio::sync::Mutex::new(storage)),
+            epoch_start_ts: Arc::new(tokio::sync::Mutex::new(now)),
+            active_namespaces: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            committed_records: Arc::new(tokio::sync::Mutex::new(Vec::new())),
         }
     }
 
@@ -143,20 +143,20 @@ impl RootSmith {
     /// Process one storage write: persist record and mark namespace as active.
     ///
     /// Returns `Ok(())` on success.
-    pub fn storage_write_once(
-        storage: &Arc<Mutex<Storage>>,
-        active_namespaces: &Arc<Mutex<HashMap<Namespace, bool>>>,
+    pub async fn storage_write_once(
+        storage: &Arc<tokio::sync::Mutex<Storage>>,
+        active_namespaces: &Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>,
         record: &IncomingRecord,
     ) -> Result<()> {
         // Persist to storage
         {
-            let db = storage.lock().unwrap();
+            let db = storage.lock().await;
             db.put(record)?;
         }
 
         // Mark namespace as active
         {
-            let mut active = active_namespaces.lock().unwrap();
+            let mut active = active_namespaces.lock().await;
             active.insert(record.namespace, true);
         }
 
@@ -180,10 +180,10 @@ impl RootSmith {
     ///
     /// Returns `Ok(true)` if a commit was performed, `Ok(false)` if not yet time.
     pub async fn process_commit_cycle(
-        epoch_start_ts: &Arc<Mutex<u64>>,
-        active_namespaces: &Arc<Mutex<HashMap<Namespace, bool>>>,
-        storage: &Arc<Mutex<Storage>>,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
+        epoch_start_ts: &Arc<tokio::sync::Mutex<u64>>,
+        active_namespaces: &Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>,
+        storage: &Arc<tokio::sync::Mutex<Storage>>,
+        committed_records: &Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>,
         commitment_registry: &Arc<tokio::sync::Mutex<CommitmentRegistryVariant>>,
         commit_tx: &AsyncSender<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>,
         batch_interval_secs: u64,
@@ -191,7 +191,7 @@ impl RootSmith {
     ) -> Result<bool> {
         // Check if it's time to commit
         let should_commit = {
-            let epoch_start = *epoch_start_ts.lock().unwrap();
+            let epoch_start = *epoch_start_ts.lock().await;
             let now = Self::now_secs();
             let elapsed = now.saturating_sub(epoch_start);
             elapsed >= batch_interval_secs
@@ -205,13 +205,13 @@ impl RootSmith {
 
         // Get list of active namespaces
         let namespaces: Vec<Namespace> = {
-            let ns = active_namespaces.lock().unwrap();
+            let ns = active_namespaces.lock().await;
             ns.keys().copied().collect()
         };
 
         if !namespaces.is_empty() {
             let committed_at = {
-                let epoch_start = *epoch_start_ts.lock().unwrap();
+                let epoch_start = *epoch_start_ts.lock().await;
                 epoch_start + batch_interval_secs
             };
 
@@ -242,11 +242,11 @@ impl RootSmith {
 
             // Reset epoch and clear active namespaces
             {
-                let mut epoch_start = epoch_start_ts.lock().unwrap();
+                let mut epoch_start = epoch_start_ts.lock().await;
                 *epoch_start = Self::now_secs();
             }
             {
-                let mut ns = active_namespaces.lock().unwrap();
+                let mut ns = active_namespaces.lock().await;
                 ns.clear();
             }
 
@@ -255,7 +255,7 @@ impl RootSmith {
             debug!("No active namespaces to commit");
             // Still update epoch start to avoid spinning
             {
-                let mut epoch_start = epoch_start_ts.lock().unwrap();
+                let mut epoch_start = epoch_start_ts.lock().await;
                 *epoch_start = Self::now_secs();
             }
         }
@@ -366,13 +366,13 @@ impl RootSmith {
     /// and deletes records up to that timestamp. Clears the committed_records list.
     ///
     /// Returns the number of records pruned.
-    pub fn prune_once(
-        storage: &Arc<Mutex<Storage>>,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
+    pub async fn prune_once(
+        storage: &Arc<tokio::sync::Mutex<Storage>>,
+        committed_records: &Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>,
     ) -> Result<usize> {
         // Extract and clear committed records
         let records = {
-            let mut committed = committed_records.lock().unwrap();
+            let mut committed = committed_records.lock().await;
             let records = committed.clone();
             committed.clear();
             records
@@ -392,7 +392,7 @@ impl RootSmith {
         }
 
         // Delete records for each namespace
-        let db = storage.lock().unwrap();
+        let db = storage.lock().await;
         let mut total_pruned = 0;
 
         for (namespace, max_ts) in namespace_max_ts {
@@ -429,17 +429,17 @@ impl RootSmith {
 
     /// Helper method to commit a namespace: scan records, build accumulator, commit, and notify proof task.
     async fn commit_namespace(
-        storage: &Arc<Mutex<Storage>>,
+        storage: &Arc<tokio::sync::Mutex<Storage>>,
         namespace: &Namespace,
         committed_at: u64,
-        committed_records: &Arc<Mutex<Vec<CommittedRecord>>>,
+        committed_records: &Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>,
         commitment_registry: &CommitmentRegistryVariant,
         commit_tx: &AsyncSender<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>,
         accumulator_type: AccumulatorType,
     ) -> Result<()> {
         // Scan storage for records in this namespace up to committed_at
         let (root, record_count, records_to_track, records_for_proof) = {
-            let storage_guard = storage.lock().unwrap();
+            let storage_guard = storage.lock().await;
 
             let filter = StorageScanFilter {
                 namespace: *namespace,
@@ -503,7 +503,7 @@ impl RootSmith {
 
         // Track records for pruning
         {
-            let mut committed = committed_records.lock().unwrap();
+            let mut committed = committed_records.lock().await;
             committed.extend(records_to_track);
         }
 
