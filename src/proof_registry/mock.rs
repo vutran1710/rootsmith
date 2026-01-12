@@ -15,6 +15,11 @@ impl MockProofRegistry {
             proofs: std::sync::Arc::new(std::sync::Mutex::new(Vec::new())),
         }
     }
+
+    /// Get all saved proofs (for testing).
+    pub fn get_proofs(&self) -> Vec<StoredProof> {
+        self.proofs.lock().unwrap().clone()
+    }
 }
 
 #[async_trait]
