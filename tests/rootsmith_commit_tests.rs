@@ -2,7 +2,7 @@ use ::rootsmith::*;
 use anyhow::Result;
 use kanal::unbounded_async;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::time::Duration;
 
 use ::rootsmith::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
@@ -47,15 +47,15 @@ async fn test_process_commit_cycle_not_ready() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
     let storage = Storage::open(temp_dir.path().to_str().unwrap())?;
 
-    let epoch_start_ts = Arc::new(Mutex::new(test_now()));
-    let active_namespaces = Arc::new(Mutex::new(HashMap::new()));
-    let committed_records = Arc::new(Mutex::new(Vec::new()));
+    let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(test_now()));
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
+    let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let commitment_registry = Arc::new(tokio::sync::Mutex::new(
         CommitmentRegistryVariant::Mock(MockCommitmentRegistry::new()),
     ));
     let (commit_tx, _commit_rx) = unbounded_async::<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>();
 
-    let storage_arc = Arc::new(Mutex::new(storage));
+    let storage_arc = Arc::new(tokio::sync::Mutex::new(storage));
     let batch_interval_secs = 60; // 60 seconds
 
     // Should return false - not enough time elapsed
@@ -88,15 +88,15 @@ async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
 
     let now = test_now();
     let epoch_start = now - 100; // Started 100 seconds ago (well past interval)
-    let epoch_start_ts = Arc::new(Mutex::new(epoch_start));
-    let active_namespaces = Arc::new(Mutex::new(HashMap::new())); // Empty
-    let committed_records = Arc::new(Mutex::new(Vec::new()));
+    let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(epoch_start));
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new())); // Empty
+    let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let commitment_registry = Arc::new(tokio::sync::Mutex::new(
         CommitmentRegistryVariant::Mock(MockCommitmentRegistry::new()),
     ));
     let (commit_tx, _commit_rx) = unbounded_async::<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>();
 
-    let storage_arc = Arc::new(Mutex::new(storage));
+    let storage_arc = Arc::new(tokio::sync::Mutex::new(storage));
     let batch_interval_secs = 60;
 
     // Should return true (processed), but no commitment since no namespaces
@@ -115,7 +115,7 @@ async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
     assert!(result, "Should process commit cycle even with no namespaces");
     
     // Verify epoch was reset
-    let new_epoch_start = *epoch_start_ts.lock().unwrap();
+    let new_epoch_start = *epoch_start_ts.lock().await;
     assert!(
         new_epoch_start >= now - 1,
         "Epoch should be reset to current time"
@@ -139,30 +139,30 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
     let namespace = test_namespace(1);
     let now = test_now();
     
-    let storage_arc = Arc::new(Mutex::new(storage));
+    let storage_arc = Arc::new(tokio::sync::Mutex::new(storage));
     
     {
-        let db = storage_arc.lock().unwrap();
+        let db = storage_arc.lock().await;
         for i in 0..3 {
             let record = IncomingRecord {
                 namespace,
                 key: test_key(i),
                 value: test_value(i),
-                timestamp: now - 10 + i as u64,
+                timestamp: now - 50 + i as u64, // Old enough to be included in commit
             };
             db.put(&record)?;
         }
     }
 
     let epoch_start = now - 100; // Started 100 seconds ago
-    let epoch_start_ts = Arc::new(Mutex::new(epoch_start));
+    let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(epoch_start));
     
     // Mark namespace as active
     let mut active_namespaces_map = HashMap::new();
     active_namespaces_map.insert(namespace, true);
-    let active_namespaces = Arc::new(Mutex::new(active_namespaces_map));
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(active_namespaces_map));
     
-    let committed_records = Arc::new(Mutex::new(Vec::new()));
+    let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
     let mock_registry = MockCommitmentRegistry::new();
     let registry_clone = mock_registry.clone();
     let commitment_registry = Arc::new(tokio::sync::Mutex::new(
@@ -206,14 +206,14 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
     );
 
     // Verify epoch was reset
-    let new_epoch_start = *epoch_start_ts.lock().unwrap();
+    let new_epoch_start = *epoch_start_ts.lock().await;
     assert!(
         new_epoch_start >= now - 1,
         "Epoch should be reset to current time"
     );
 
     // Verify active namespaces cleared
-    let active = active_namespaces.lock().unwrap();
+    let active = active_namespaces.lock().await;
     assert!(active.is_empty(), "Active namespaces should be cleared");
 
     println!("✓ Commit cycle processed successfully");
