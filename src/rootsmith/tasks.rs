@@ -22,7 +22,7 @@ use super::core::{CommittedRecord, RootSmith};
 // ==================== TYPE ALIASES ====================
 
 type NamespaceMap = Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>;
-type Storage = Arc<tokio::sync::Mutex<crate::storage::Storage>>;
+type StorageArc = Arc<tokio::sync::Mutex<Storage>>;
 type CommittedRecordsList = Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>;
 type EpochStartTs = Arc<tokio::sync::Mutex<u64>>;
 type CommitmentRegistry = Arc<tokio::sync::Mutex<CommitmentRegistryVariant>>;
@@ -131,7 +131,7 @@ async fn process_upstream(
 
 /// Process storage write: consume a record from channel and persist to storage.
 async fn process_storage_write(
-    storage: &Storage,
+    storage: &StorageArc,
     active_namespaces: &NamespaceMap,
     record: IncomingRecord,
 ) -> Result<()> {
@@ -158,7 +158,7 @@ async fn process_proof_delivery(
 
 /// Process DB prune cycle: prune committed records from storage.
 async fn process_db_prune(
-    storage: &Storage,
+    storage: &StorageArc,
     committed_records: &CommittedRecordsList,
 ) -> Result<usize> {
     RootSmith::prune_once(storage, committed_records).await
@@ -167,7 +167,7 @@ async fn process_db_prune(
 /// Process archiving cycle: archive old records and commitments.
 async fn process_archiving_cycle(
     archive_storage: &ArchiveStorage,
-    storage: &Storage,
+    storage: &StorageArc,
     active_namespaces: &NamespaceMap,
     commitment_registry: &CommitmentRegistry,
     archive_threshold_secs: u64,
@@ -232,7 +232,7 @@ async fn process_archiving_cycle(
 /// Archive old records from storage.
 async fn archive_old_records(
     archive_storage: &ArchiveStorage,
-    storage: &Storage,
+    storage: &StorageArc,
     namespaces: &[Namespace],
     archive_cutoff: u64,
 ) -> Result<usize> {
