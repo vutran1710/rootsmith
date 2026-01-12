@@ -1,11 +1,13 @@
-use super::{
-    mock::MockProofRegistry, noop::NoopProofRegistry, proof_github::ProofGithub, proof_s3::ProofS3,
-};
+use anyhow::Result;
+use async_trait::async_trait;
+
+use super::mock::MockProofRegistry;
+use super::noop::NoopProofRegistry;
+use super::proof_github::ProofGithub;
+use super::proof_s3::ProofS3;
 use crate::config::ProofRegistryType;
 use crate::traits::ProofRegistry;
 use crate::types::StoredProof;
-use anyhow::Result;
-use async_trait::async_trait;
 
 /// Enum representing all possible proof registry implementations.
 pub enum ProofRegistryVariant {

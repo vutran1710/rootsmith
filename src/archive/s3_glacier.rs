@@ -1,6 +1,9 @@
-use crate::traits::{ArchiveData, ArchiveFilter, ArchiveStorage};
 use anyhow::Result;
 use async_trait::async_trait;
+
+use crate::traits::ArchiveData;
+use crate::traits::ArchiveFilter;
+use crate::traits::ArchiveStorage;
 
 /// S3 Glacier-based archive storage.
 /// Archives data to AWS S3 Glacier for long-term, low-cost storage.
@@ -36,7 +39,7 @@ impl ArchiveStorage for S3GlacierArchive {
 
     async fn archive(&self, data: &ArchiveData) -> Result<String> {
         let archive_id = uuid::Uuid::new_v4().to_string();
-        
+
         tracing::info!(
             "S3 Glacier: would archive data to bucket={}, region={}, key={}/{}",
             self.bucket,
@@ -138,4 +141,3 @@ impl ArchiveStorage for S3GlacierArchive {
         Ok(())
     }
 }
-

@@ -1,6 +1,7 @@
-use crate::types::StoredProof;
 use anyhow::Result;
 use async_trait::async_trait;
+
+use crate::types::StoredProof;
 
 /// Trait for proof delivery mechanisms (Kafka, webhooks, message queues, etc.).
 ///

@@ -1,15 +1,26 @@
-use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
-use anyhow::Result;
-use async_trait::async_trait;
-use hyper::service::{make_service_fn, service_fn};
-use hyper::{Body, Method, Request, Response, Server, StatusCode};
-use kanal::AsyncSender;
 use std::convert::Infallible;
 use std::net::SocketAddr;
 use std::sync::Arc;
+
+use anyhow::Result;
+use async_trait::async_trait;
+use hyper::service::make_service_fn;
+use hyper::service::service_fn;
+use hyper::Body;
+use hyper::Method;
+use hyper::Request;
+use hyper::Response;
+use hyper::Server;
+use hyper::StatusCode;
+use kanal::AsyncSender;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info, warn};
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
+
+use crate::traits::UpstreamConnector;
+use crate::types::IncomingRecord;
 
 /// HTTP upstream connector that runs an HTTP server to receive IncomingRecords.
 ///
@@ -97,14 +108,10 @@ impl HttpSource {
                 .unwrap()),
 
             // Single record ingestion
-            (&Method::POST, "/ingest") => {
-                Self::handle_ingest_single(req, tx).await
-            }
+            (&Method::POST, "/ingest") => Self::handle_ingest_single(req, tx).await,
 
             // Batch record ingestion
-            (&Method::POST, "/ingest/batch") => {
-                Self::handle_ingest_batch(req, tx).await
-            }
+            (&Method::POST, "/ingest/batch") => Self::handle_ingest_batch(req, tx).await,
 
             // 404 for all other routes
             _ => Ok(Response::builder()
@@ -126,7 +133,10 @@ impl HttpSource {
                 error!("Failed to read request body: {}", e);
                 return Ok(Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from(format!(r#"{{"error":"invalid_body","message":"{}"}}"#, e)))
+                    .body(Body::from(format!(
+                        r#"{{"error":"invalid_body","message":"{}"}}"#,
+                        e
+                    )))
                     .unwrap());
             }
         };
@@ -138,7 +148,10 @@ impl HttpSource {
                 error!("Failed to parse IncomingRecord: {}", e);
                 return Ok(Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from(format!(r#"{{"error":"invalid_json","message":"{}"}}"#, e)))
+                    .body(Body::from(format!(
+                        r#"{{"error":"invalid_json","message":"{}"}}"#,
+                        e
+                    )))
                     .unwrap());
             }
         };
@@ -183,7 +196,10 @@ impl HttpSource {
                 error!("Failed to read request body: {}", e);
                 return Ok(Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from(format!(r#"{{"error":"invalid_body","message":"{}"}}"#, e)))
+                    .body(Body::from(format!(
+                        r#"{{"error":"invalid_body","message":"{}"}}"#,
+                        e
+                    )))
                     .unwrap());
             }
         };
@@ -195,7 +211,10 @@ impl HttpSource {
                 error!("Failed to parse IncomingRecord array: {}", e);
                 return Ok(Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body(Body::from(format!(r#"{{"error":"invalid_json","message":"{}"}}"#, e)))
+                    .body(Body::from(format!(
+                        r#"{{"error":"invalid_json","message":"{}"}}"#,
+                        e
+                    )))
                     .unwrap());
             }
         };
@@ -216,12 +235,18 @@ impl HttpSource {
                 }
             }
 
-            debug!("Successfully ingested {}/{} records", success_count, record_count);
+            debug!(
+                "Successfully ingested {}/{} records",
+                success_count, record_count
+            );
 
             if success_count == record_count {
                 Ok(Response::builder()
                     .status(StatusCode::OK)
-                    .body(Body::from(format!(r#"{{"status":"ok","ingested":{}}}"#, success_count)))
+                    .body(Body::from(format!(
+                        r#"{{"status":"ok","ingested":{}}}"#,
+                        success_count
+                    )))
                     .unwrap())
             } else {
                 Ok(Response::builder()
@@ -329,8 +354,9 @@ impl UpstreamConnector for HttpSource {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use kanal::unbounded_async;
+
+    use super::*;
 
     #[tokio::test]
     async fn test_http_source_new() {
@@ -364,7 +390,10 @@ mod tests {
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let addr = source.actual_addr().await.expect("Server should have bound address");
+        let addr = source
+            .actual_addr()
+            .await
+            .expect("Server should have bound address");
 
         // Test health endpoint
         let client = hyper::Client::new();
@@ -390,7 +419,10 @@ mod tests {
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let addr = source.actual_addr().await.expect("Server should have bound address");
+        let addr = source
+            .actual_addr()
+            .await
+            .expect("Server should have bound address");
 
         // Create test record
         let record = IncomingRecord {
@@ -435,7 +467,10 @@ mod tests {
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let addr = source.actual_addr().await.expect("Server should have bound address");
+        let addr = source
+            .actual_addr()
+            .await
+            .expect("Server should have bound address");
 
         // Create test records
         let records = vec![
@@ -488,7 +523,10 @@ mod tests {
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let addr = source.actual_addr().await.expect("Server should have bound address");
+        let addr = source
+            .actual_addr()
+            .await
+            .expect("Server should have bound address");
 
         // Send invalid JSON
         let client = hyper::Client::new();
@@ -521,7 +559,10 @@ mod tests {
         // Give server time to start
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
-        let addr = source.actual_addr().await.expect("Server should have bound address");
+        let addr = source
+            .actual_addr()
+            .await
+            .expect("Server should have bound address");
 
         // Test non-existent endpoint
         let client = hyper::Client::new();

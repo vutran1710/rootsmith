@@ -1,7 +1,8 @@
-use crate::traits::ProofDelivery;
-use crate::types::StoredProof;
 use anyhow::Result;
 use async_trait::async_trait;
+
+use crate::traits::ProofDelivery;
+use crate::types::StoredProof;
 
 /// Noop proof delivery that doesn't deliver proofs anywhere.
 /// Useful for testing or when delivery is not needed.
@@ -23,4 +24,3 @@ impl ProofDelivery for NoopDelivery {
         Ok(())
     }
 }
-

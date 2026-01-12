@@ -1,5 +1,7 @@
-use clap::{Parser, ValueEnum};
-use serde::{Deserialize, Serialize};
+use clap::Parser;
+use clap::ValueEnum;
+use serde::Deserialize;
+use serde::Serialize;
 
 /// Type of upstream connector to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]

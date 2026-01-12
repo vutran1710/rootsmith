@@ -4,21 +4,32 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
+use anyhow::Result;
+use futures_util::future;
+use kanal::unbounded_async;
+use kanal::AsyncReceiver;
+use kanal::AsyncSender;
+use tokio::task::JoinHandle;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
+use tracing::span;
+use tracing::Level;
+
+use super::core::CommittedRecord;
+use super::core::RootSmith;
 use crate::archive::ArchiveStorageVariant;
 use crate::commitment_registry::CommitmentRegistryVariant;
 use crate::config::AccumulatorType;
 use crate::proof_delivery::ProofDeliveryVariant;
 use crate::proof_registry::ProofRegistryVariant;
 use crate::storage::Storage;
-use crate::types::{IncomingRecord, Key32, Namespace, StoredProof, Value32};
+use crate::types::IncomingRecord;
+use crate::types::Key32;
+use crate::types::Namespace;
+use crate::types::StoredProof;
+use crate::types::Value32;
 use crate::upstream::UpstreamVariant;
-use anyhow::Result;
-use futures_util::future;
-use kanal::{unbounded_async, AsyncReceiver, AsyncSender};
-use tokio::task::JoinHandle;
-use tracing::{debug, error, info, span, Level};
-
-use super::core::{CommittedRecord, RootSmith};
 
 // ==================== TYPE ALIASES ====================
 
@@ -27,11 +38,10 @@ type StorageArc = Arc<tokio::sync::Mutex<Storage>>;
 type CommitmentRegistry = Arc<tokio::sync::Mutex<CommitmentRegistryVariant>>;
 type ArchiveStorage = Arc<tokio::sync::Mutex<ArchiveStorageVariant>>;
 
-
 // ==================== GENERIC TASK UTILITIES ====================
 
 /// Spawn an interval-based task that runs periodically or continuously.
-/// 
+///
 /// If `interval` is `Some(duration)`, sleeps between iterations.
 /// If `interval` is `None`, yields with `tokio::task::yield_now()`.
 fn spawn_interval_task<F, Fut>(
@@ -67,7 +77,7 @@ where
 }
 
 /// Spawn a channel consumer task that processes messages from an AsyncReceiver.
-/// 
+///
 /// Consumes messages from the receiver and processes them with the provided function.
 /// Handles channel closure gracefully.
 fn spawn_channel_consumer_task<T, F, Fut>(
@@ -98,12 +108,9 @@ where
 }
 
 /// Spawn a one-time task that runs once and completes.
-/// 
+///
 /// Runs the provided async function once and returns its result.
-fn spawn_oneshot_task<F, Fut>(
-    name: &'static str,
-    task_fn: F,
-) -> JoinHandle<Result<()>>
+fn spawn_oneshot_task<F, Fut>(name: &'static str, task_fn: F) -> JoinHandle<Result<()>>
 where
     F: FnOnce() -> Fut + Send + 'static,
     Fut: std::future::Future<Output = Result<()>> + Send,
@@ -153,13 +160,8 @@ async fn process_archiving_cycle(
     );
 
     // Archive old records
-    let archived_count = archive_old_records(
-        archive_storage,
-        storage,
-        &namespaces,
-        archive_cutoff,
-    )
-    .await?;
+    let archived_count =
+        archive_old_records(archive_storage, storage, &namespaces, archive_cutoff).await?;
 
     // Archive old commitments
     let archived_commitments = archive_old_commitments(
@@ -192,7 +194,8 @@ async fn archive_old_records(
     archive_cutoff: u64,
 ) -> Result<usize> {
     use crate::storage::StorageScanFilter;
-    use crate::traits::{ArchiveData, ArchiveStorage as ArchiveStorageTrait};
+    use crate::traits::ArchiveData;
+    use crate::traits::ArchiveStorage as ArchiveStorageTrait;
 
     let mut archived_count = 0;
 
@@ -222,8 +225,10 @@ async fn archive_old_records(
             // Archive records in batches
             let batch_size = 100;
             for chunk in records.chunks(batch_size) {
-                let archive_data: Vec<ArchiveData> =
-                    chunk.iter().map(|r| ArchiveData::Record(r.clone())).collect();
+                let archive_data: Vec<ArchiveData> = chunk
+                    .iter()
+                    .map(|r| ArchiveData::Record(r.clone()))
+                    .collect();
 
                 let mut archive = archive_storage.lock().await;
                 match (*archive).archive_batch(&archive_data).await {
@@ -253,8 +258,11 @@ async fn archive_old_commitments(
     namespaces: &[Namespace],
     archive_cutoff: u64,
 ) -> Result<usize> {
-    use crate::traits::{ArchiveData, ArchiveStorage as ArchiveStorageTrait, CommitmentRegistry as CommitmentRegistryTrait};
-    use crate::types::{BatchCommitmentMeta, CommitmentFilterOptions};
+    use crate::traits::ArchiveData;
+    use crate::traits::ArchiveStorage as ArchiveStorageTrait;
+    use crate::traits::CommitmentRegistry as CommitmentRegistryTrait;
+    use crate::types::BatchCommitmentMeta;
+    use crate::types::CommitmentFilterOptions;
 
     let mut archived_commitments = 0;
 
@@ -353,9 +361,7 @@ impl RootSmith {
             spawn_channel_consumer_task("storage_write", data_rx, move |record| {
                 let storage = Arc::clone(&storage);
                 let active_namespaces = Arc::clone(&active_namespaces);
-                async move {
-                    RootSmith::storage_write_once(&storage, &active_namespaces, &record).await
-                }
+                async move { RootSmith::storage_write_once(&storage, &active_namespaces, &record).await }
             })
         };
 
@@ -377,7 +383,7 @@ impl RootSmith {
                 let commitment_registry = Arc::clone(&commitment_registry);
                 let commit_tx = commit_tx.clone();
                 let config_clone = config_clone.clone();
-                
+
                 async move {
                     RootSmith::process_commit_cycle(
                         &epoch_start_ts,
@@ -401,25 +407,29 @@ impl RootSmith {
             let config_clone = config.clone();
             let proof_delivery_tx = proof_delivery_tx.clone();
 
-            spawn_channel_consumer_task("proof_registry", commit_rx, move |(namespace, root, committed_at, records)| {
-                let proof_registry = Arc::clone(&proof_registry);
-                let proof_delivery_tx = proof_delivery_tx.clone();
-                let config_clone = config_clone.clone();
-                
-                async move {
-                    RootSmith::process_proof_generation(
-                        namespace,
-                        root,
-                        committed_at,
-                        records,
-                        &proof_registry,
-                        &proof_delivery_tx,
-                        config_clone.accumulator_type,
-                    )
-                    .await
-                    .map(|_| ())
-                }
-            })
+            spawn_channel_consumer_task(
+                "proof_registry",
+                commit_rx,
+                move |(namespace, root, committed_at, records)| {
+                    let proof_registry = Arc::clone(&proof_registry);
+                    let proof_delivery_tx = proof_delivery_tx.clone();
+                    let config_clone = config_clone.clone();
+
+                    async move {
+                        RootSmith::process_proof_generation(
+                            namespace,
+                            root,
+                            committed_at,
+                            records,
+                            &proof_registry,
+                            &proof_delivery_tx,
+                            config_clone.accumulator_type,
+                        )
+                        .await
+                        .map(|_| ())
+                    }
+                },
+            )
         };
 
         // === Proof delivery task: deliver proofs to downstream consumers ===
@@ -428,7 +438,7 @@ impl RootSmith {
 
             spawn_channel_consumer_task("proof_delivery", proof_delivery_rx, move |proofs| {
                 let proof_delivery = Arc::clone(&proof_delivery);
-                
+
                 async move {
                     if proofs.is_empty() {
                         return Ok(());
@@ -453,7 +463,7 @@ impl RootSmith {
             spawn_interval_task("db_prune", Some(Duration::from_secs(5)), move || {
                 let storage = Arc::clone(&storage);
                 let committed_records = Arc::clone(&committed_records);
-                
+
                 async move {
                     match RootSmith::prune_once(&storage, &committed_records).await {
                         Ok(count) if count > 0 => {
@@ -486,7 +496,7 @@ impl RootSmith {
                 let storage = Arc::clone(&storage);
                 let active_namespaces = Arc::clone(&active_namespaces);
                 let commitment_registry = Arc::clone(&commitment_registry);
-                
+
                 async move {
                     process_archiving_cycle(
                         &archive_storage,
@@ -539,4 +549,3 @@ impl RootSmith {
         Ok(())
     }
 }
-

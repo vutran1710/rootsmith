@@ -1,12 +1,14 @@
-use super::{
-    commitment_contract::CommitmentContract, commitment_noop::CommitmentNoop,
-    mock::MockCommitmentRegistry,
-};
-use crate::config::CommitmentRegistryType;
-use crate::traits::CommitmentRegistry;
-use crate::types::{BatchCommitmentMeta, Commitment, CommitmentFilterOptions};
 use anyhow::Result;
 use async_trait::async_trait;
+
+use super::commitment_contract::CommitmentContract;
+use super::commitment_noop::CommitmentNoop;
+use super::mock::MockCommitmentRegistry;
+use crate::config::CommitmentRegistryType;
+use crate::traits::CommitmentRegistry;
+use crate::types::BatchCommitmentMeta;
+use crate::types::Commitment;
+use crate::types::CommitmentFilterOptions;
 
 /// Enum representing all possible commitment registry implementations.
 pub enum CommitmentRegistryVariant {

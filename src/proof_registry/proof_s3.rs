@@ -1,7 +1,8 @@
-use crate::traits::ProofRegistry;
-use crate::types::StoredProof;
 use anyhow::Result;
 use async_trait::async_trait;
+
+use crate::traits::ProofRegistry;
+use crate::types::StoredProof;
 
 pub struct ProofS3 {
     bucket: String,

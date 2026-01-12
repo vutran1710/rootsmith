@@ -1,16 +1,29 @@
+use std::sync::Arc;
+
+use anyhow::Context;
+use anyhow::Result;
+use async_trait::async_trait;
+use futures_util::SinkExt;
+use futures_util::StreamExt;
+use kanal::AsyncSender;
+use tokio::sync::Mutex;
+use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::Message;
+
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
-use anyhow::{Context, Result};
-use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
-use kanal::AsyncSender;
-use std::sync::Arc;
-use tokio::sync::Mutex;
-use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 pub struct WebSocketSource {
     url: String,
-    connection_handle: Option<Arc<Mutex<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>>>,
+    connection_handle: Option<
+        Arc<
+            Mutex<
+                tokio_tungstenite::WebSocketStream<
+                    tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+                >,
+            >,
+        >,
+    >,
 }
 
 impl WebSocketSource {
@@ -111,7 +124,9 @@ impl UpstreamConnector for WebSocketSource {
 
         if let Some(stream) = &self.connection_handle {
             let mut ws = stream.lock().await;
-            ws.close(None).await.context("Failed to close WebSocket connection")?;
+            ws.close(None)
+                .await
+                .context("Failed to close WebSocket connection")?;
         }
 
         self.connection_handle = None;
