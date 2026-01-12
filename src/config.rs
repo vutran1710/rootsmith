@@ -9,12 +9,6 @@ pub enum UpstreamType {
     Http,
     /// WebSocket upstream.
     WebSocket,
-    /// Kafka upstream.
-    Kafka,
-    /// SQS upstream.
-    Sqs,
-    /// MQTT upstream.
-    Mqtt,
     /// No-op upstream (does nothing).
     Noop,
     /// Mock upstream (for testing).
