@@ -1,4 +1,5 @@
 use anyhow::Result;
+
 use crate::proof_registry::types::ProofNodeJson;
 use crate::types::Proof;
 

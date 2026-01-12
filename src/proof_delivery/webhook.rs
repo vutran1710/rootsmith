@@ -1,7 +1,8 @@
-use crate::traits::ProofDelivery;
-use crate::types::StoredProof;
 use anyhow::Result;
 use async_trait::async_trait;
+
+use crate::traits::ProofDelivery;
+use crate::types::StoredProof;
 
 /// Webhook-based proof delivery.
 /// POSTs proofs to an HTTP endpoint for downstream consumers.
@@ -60,7 +61,7 @@ impl ProofDelivery for WebhookDelivery {
         // Could send all proofs in a single JSON array
         // let client = reqwest::Client::new();
         // client.post(&self.url).json(&proofs).send().await?;
-        
+
         // For now, deliver individually
         for proof in proofs {
             self.deliver(proof).await?;
@@ -74,4 +75,3 @@ impl ProofDelivery for WebhookDelivery {
         Ok(())
     }
 }
-

@@ -1,11 +1,18 @@
-use crate::traits::Accumulator;
-use crate::types::{Key32, Proof, ProofNode, Value32};
+use std::sync::Mutex;
+
 use anyhow::Result;
 use monotree::database::MemoryDB;
 use monotree::hasher::Blake3 as MonotreeBlake3;
 use monotree::hasher::Hasher;
-use monotree::{verify_proof as monotree_verify_proof, Hash, Monotree};
-use std::sync::Mutex;
+use monotree::verify_proof as monotree_verify_proof;
+use monotree::Hash;
+use monotree::Monotree;
+
+use crate::traits::Accumulator;
+use crate::types::Key32;
+use crate::types::Proof;
+use crate::types::ProofNode;
+use crate::types::Value32;
 
 /// Sparse Merkle tree based accumulator using monotree library.
 pub struct SparseMerkleAccumulator {
@@ -33,7 +40,7 @@ impl SparseMerkleAccumulator {
         arr.copy_from_slice(out.as_bytes());
         Hash::from(arr)
     }
-    
+
     #[inline]
     fn key_bit_msb(key: &Key32, depth: usize) -> bool {
         let byte = key[depth / 8];

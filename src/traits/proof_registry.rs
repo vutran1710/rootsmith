@@ -1,6 +1,7 @@
-use crate::types::StoredProof;
 use anyhow::Result;
 use async_trait::async_trait;
+
+use crate::types::StoredProof;
 
 /// Where proofs are stored (e.g. S3, GitHub, on-chain, file system).
 #[async_trait]

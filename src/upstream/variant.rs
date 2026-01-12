@@ -1,13 +1,14 @@
-use super::{
-    http::HttpSource, mock::MockUpstream,
-    noop::NoopUpstream, websocket::WebSocketSource,
-};
-use crate::config::UpstreamType;
-use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
 use anyhow::Result;
 use async_trait::async_trait;
 use kanal::AsyncSender;
+
+use super::http::HttpSource;
+use super::mock::MockUpstream;
+use super::noop::NoopUpstream;
+use super::websocket::WebSocketSource;
+use crate::config::UpstreamType;
+use crate::traits::UpstreamConnector;
+use crate::types::IncomingRecord;
 
 /// Enum representing all possible upstream connector implementations.
 pub enum UpstreamVariant {

@@ -1,8 +1,11 @@
-use crate::traits::ProofDelivery;
-use crate::types::StoredProof;
+use std::sync::Arc;
+use std::sync::Mutex;
+
 use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::{Arc, Mutex};
+
+use crate::traits::ProofDelivery;
+use crate::types::StoredProof;
 
 /// Mock proof delivery for testing.
 /// Stores delivered proofs in memory for verification.
@@ -59,4 +62,3 @@ impl ProofDelivery for MockDelivery {
         Ok(())
     }
 }
-

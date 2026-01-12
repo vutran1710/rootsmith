@@ -1,13 +1,19 @@
-use criterion::{
-    black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion,
-};
-use rand::{rngs::StdRng, RngCore, SeedableRng};
 use std::time::Duration;
 
+use criterion::black_box;
+use criterion::criterion_group;
+use criterion::criterion_main;
+use criterion::BatchSize;
+use criterion::BenchmarkId;
+use criterion::Criterion;
+use rand::rngs::StdRng;
+use rand::RngCore;
+use rand::SeedableRng;
 use rootsmith::crypto::merkle_accumulator::MerkleAccumulator;
 use rootsmith::crypto::sparse_merkle_accumulator::SparseMerkleAccumulator;
 use rootsmith::traits::Accumulator;
-use rootsmith::types::{Key32, Value32};
+use rootsmith::types::Key32;
+use rootsmith::types::Value32;
 
 const N: usize = 1000_000;
 

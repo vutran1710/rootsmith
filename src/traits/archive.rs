@@ -1,7 +1,11 @@
-use crate::types::{BatchCommitmentMeta, IncomingRecord, StoredProof};
 use anyhow::Result;
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
+use serde::Serialize;
+
+use crate::types::BatchCommitmentMeta;
+use crate::types::IncomingRecord;
+use crate::types::StoredProof;
 
 /// Filter options for querying archived data.
 #[derive(Debug, Clone, Serialize, Deserialize)]

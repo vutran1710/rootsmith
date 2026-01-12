@@ -1,8 +1,14 @@
-use anyhow::Result;
-use rocksdb::{Direction, IteratorMode, Options, DB};
 use std::sync::Arc;
 
-use crate::types::{IncomingRecord, Key32, Namespace};
+use anyhow::Result;
+use rocksdb::Direction;
+use rocksdb::IteratorMode;
+use rocksdb::Options;
+use rocksdb::DB;
+
+use crate::types::IncomingRecord;
+use crate::types::Key32;
+use crate::types::Namespace;
 
 const NS_LEN: usize = 32;
 const TS_LEN: usize = 8;

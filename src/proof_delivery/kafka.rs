@@ -1,7 +1,8 @@
-use crate::traits::ProofDelivery;
-use crate::types::StoredProof;
 use anyhow::Result;
 use async_trait::async_trait;
+
+use crate::traits::ProofDelivery;
+use crate::types::StoredProof;
 
 /// Kafka-based proof delivery.
 /// Publishes proofs to a Kafka topic for downstream consumers.
@@ -66,4 +67,3 @@ impl ProofDelivery for KafkaDelivery {
         Ok(())
     }
 }
-

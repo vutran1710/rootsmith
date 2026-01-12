@@ -1,8 +1,15 @@
-use crate::traits::Accumulator;
-use crate::types::{Key32, Proof, ProofNode, Value32};
-use anyhow::Result;
-use rs_merkle::{algorithms::Sha256, Hasher, MerkleTree as RsMerkleTree};
 use std::collections::HashMap;
+
+use anyhow::Result;
+use rs_merkle::algorithms::Sha256;
+use rs_merkle::Hasher;
+use rs_merkle::MerkleTree as RsMerkleTree;
+
+use crate::traits::Accumulator;
+use crate::types::Key32;
+use crate::types::Proof;
+use crate::types::ProofNode;
+use crate::types::Value32;
 
 pub struct MerkleAccumulator {
     leaves: Vec<[u8; 32]>,

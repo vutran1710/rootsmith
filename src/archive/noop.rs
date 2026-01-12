@@ -1,6 +1,9 @@
-use crate::traits::{ArchiveData, ArchiveFilter, ArchiveStorage};
 use anyhow::Result;
 use async_trait::async_trait;
+
+use crate::traits::ArchiveData;
+use crate::traits::ArchiveFilter;
+use crate::traits::ArchiveStorage;
 
 /// Noop archive storage that doesn't archive anything.
 /// Useful for testing or when archiving is not needed.
@@ -27,4 +30,3 @@ impl ArchiveStorage for NoopArchive {
         Ok(Vec::new())
     }
 }
-

@@ -1,7 +1,8 @@
-use crate::traits::ProofRegistry;
-use crate::types::StoredProof;
 use anyhow::Result;
 use async_trait::async_trait;
+
+use crate::traits::ProofRegistry;
+use crate::types::StoredProof;
 
 /// Mock proof registry for testing.
 #[derive(Clone)]

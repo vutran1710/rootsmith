@@ -1,7 +1,13 @@
-use super::{file::FileArchive, mock::MockArchive, noop::NoopArchive, s3_glacier::S3GlacierArchive};
-use crate::traits::{ArchiveData, ArchiveFilter, ArchiveStorage};
 use anyhow::Result;
 use async_trait::async_trait;
+
+use super::file::FileArchive;
+use super::mock::MockArchive;
+use super::noop::NoopArchive;
+use super::s3_glacier::S3GlacierArchive;
+use crate::traits::ArchiveData;
+use crate::traits::ArchiveFilter;
+use crate::traits::ArchiveStorage;
 
 /// Enum representing all possible archive storage implementations.
 pub enum ArchiveStorageVariant {
@@ -85,4 +91,3 @@ impl ArchiveStorage for ArchiveStorageVariant {
         }
     }
 }
-

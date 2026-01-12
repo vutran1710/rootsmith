@@ -9,4 +9,3 @@ pub use mock::MockArchive;
 pub use noop::NoopArchive;
 pub use s3_glacier::S3GlacierArchive;
 pub use variant::ArchiveStorageVariant;
-

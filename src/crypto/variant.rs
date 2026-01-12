@@ -1,10 +1,12 @@
-use super::{
-    merkle_accumulator::MerkleAccumulator, sparse_merkle_accumulator::SparseMerkleAccumulator,
-};
+use anyhow::Result;
+
+use super::merkle_accumulator::MerkleAccumulator;
+use super::sparse_merkle_accumulator::SparseMerkleAccumulator;
 use crate::config::AccumulatorType;
 use crate::traits::Accumulator;
-use crate::types::{Key32, Proof, Value32};
-use anyhow::Result;
+use crate::types::Key32;
+use crate::types::Proof;
+use crate::types::Value32;
 
 /// Enum representing all possible accumulator implementations.
 pub enum AccumulatorVariant {

@@ -2,26 +2,40 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
+
+use anyhow::Result;
+use kanal::AsyncSender;
+use tracing::debug;
+use tracing::error;
+use tracing::info;
 
 use crate::archive::ArchiveStorageVariant;
 use crate::commitment_registry::CommitmentRegistryVariant;
-use crate::config::{AccumulatorType, BaseConfig};
+use crate::config::AccumulatorType;
+use crate::config::BaseConfig;
 use crate::crypto::AccumulatorVariant;
 use crate::proof_delivery::ProofDeliveryVariant;
 use crate::proof_registry::ProofRegistryVariant;
-use crate::storage::{Storage, StorageDeleteFilter, StorageScanFilter};
-use crate::traits::{
-    Accumulator, ArchiveData, ArchiveStorage, CommitmentRegistry, ProofDelivery, ProofRegistry,
-    UpstreamConnector,
-};
-use crate::types::{
-    BatchCommitmentMeta, Commitment, IncomingRecord, Key32, Namespace, StoredProof, Value32,
-};
+use crate::storage::Storage;
+use crate::storage::StorageDeleteFilter;
+use crate::storage::StorageScanFilter;
+use crate::traits::Accumulator;
+use crate::traits::ArchiveData;
+use crate::traits::ArchiveStorage;
+use crate::traits::CommitmentRegistry;
+use crate::traits::ProofDelivery;
+use crate::traits::ProofRegistry;
+use crate::traits::UpstreamConnector;
+use crate::types::BatchCommitmentMeta;
+use crate::types::Commitment;
+use crate::types::IncomingRecord;
+use crate::types::Key32;
+use crate::types::Namespace;
+use crate::types::StoredProof;
+use crate::types::Value32;
 use crate::upstream::UpstreamVariant;
-use anyhow::Result;
-use kanal::AsyncSender;
-use tracing::{debug, error, info};
 
 /// Epoch phase for the commit cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -103,11 +117,14 @@ impl RootSmith {
 
     /// Initialize RootSmith with default Noop implementations.
     pub async fn initialize(config: BaseConfig) -> Result<Self> {
-        use crate::archive::{ArchiveStorageVariant, NoopArchive};
+        use crate::archive::ArchiveStorageVariant;
+        use crate::archive::NoopArchive;
         use crate::commitment_registry::commitment_noop::CommitmentNoop;
         use crate::commitment_registry::CommitmentRegistryVariant;
-        use crate::proof_delivery::{NoopDelivery, ProofDeliveryVariant};
-        use crate::proof_registry::{NoopProofRegistry, ProofRegistryVariant};
+        use crate::proof_delivery::NoopDelivery;
+        use crate::proof_delivery::ProofDeliveryVariant;
+        use crate::proof_registry::NoopProofRegistry;
+        use crate::proof_registry::ProofRegistryVariant;
         use crate::upstream::NoopUpstream;
 
         let storage = Storage::open(&config.storage_path)?;
@@ -519,4 +536,3 @@ impl RootSmith {
         Ok(())
     }
 }
-

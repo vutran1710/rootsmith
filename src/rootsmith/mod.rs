@@ -9,8 +9,9 @@ pub mod core;
 pub mod tasks;
 
 // Re-export main types and structs
-pub use core::{CommittedRecord, EpochPhase, RootSmith};
+pub use core::CommittedRecord;
+pub use core::EpochPhase;
+pub use core::RootSmith;
 
 #[cfg(test)]
 mod tests;
-
