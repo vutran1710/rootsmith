@@ -13,6 +13,7 @@ use crate::storage::Storage;
 use crate::types::{IncomingRecord, Key32, Namespace, StoredProof, Value32};
 use crate::upstream::UpstreamVariant;
 use anyhow::Result;
+use futures_util::future;
 use kanal::{unbounded_async, AsyncReceiver, AsyncSender};
 use tokio::task::JoinHandle;
 use tracing::{debug, error, info, span, Level};
@@ -23,12 +24,9 @@ use super::core::{CommittedRecord, RootSmith};
 
 type NamespaceMap = Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>;
 type StorageArc = Arc<tokio::sync::Mutex<Storage>>;
-type CommittedRecordsList = Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>;
-type EpochStartTs = Arc<tokio::sync::Mutex<u64>>;
 type CommitmentRegistry = Arc<tokio::sync::Mutex<CommitmentRegistryVariant>>;
-type ProofRegistry = Arc<tokio::sync::Mutex<ProofRegistryVariant>>;
-type ProofDelivery = Arc<tokio::sync::Mutex<ProofDeliveryVariant>>;
 type ArchiveStorage = Arc<tokio::sync::Mutex<ArchiveStorageVariant>>;
+
 
 // ==================== GENERIC TASK UTILITIES ====================
 
@@ -521,19 +519,8 @@ impl RootSmith {
             Ok(())
         });
 
-        // Wait for all tasks to complete.
-        let (
-            upstream_res,
-            storage_res,
-            commit_res,
-            proof_registry_res,
-            proof_delivery_res,
-            db_prune_res,
-            archiving_res,
-            query_layer_res,
-            metrics_layer_res,
-            admin_server_res,
-        ) = tokio::join!(
+        // Wait for all tasks to complete with fail-fast behavior
+        let handles = vec![
             upstream_handle,
             storage_handle,
             commit_handle,
@@ -544,18 +531,9 @@ impl RootSmith {
             query_layer_handle,
             metrics_layer_handle,
             admin_server_handle,
-        );
+        ];
 
-        upstream_res??;
-        storage_res??;
-        commit_res??;
-        proof_registry_res??;
-        proof_delivery_res??;
-        db_prune_res??;
-        archiving_res??;
-        query_layer_res??;
-        metrics_layer_res??;
-        admin_server_res??;
+        future::try_join_all(handles).await?;
 
         info!("RootSmith run completed successfully");
         Ok(())
