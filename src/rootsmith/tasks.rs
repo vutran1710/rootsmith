@@ -121,49 +121,6 @@ where
 
 // ==================== STATELESS BUSINESS LOGIC FUNCTIONS ====================
 
-/// Process upstream data: run the upstream connector and forward records to the channel.
-async fn process_upstream(
-    mut upstream: UpstreamVariant,
-    data_tx: AsyncSender<IncomingRecord>,
-) -> Result<()> {
-    RootSmith::run_upstream_task(upstream, data_tx).await
-}
-
-/// Process storage write: consume a record from channel and persist to storage.
-async fn process_storage_write(
-    storage: &StorageArc,
-    active_namespaces: &NamespaceMap,
-    record: IncomingRecord,
-) -> Result<()> {
-    RootSmith::storage_write_once(storage, active_namespaces, &record).await
-}
-
-/// Process proof delivery: deliver a batch of proofs.
-async fn process_proof_delivery(
-    proof_delivery: &ProofDelivery,
-    proofs: Vec<StoredProof>,
-) -> Result<()> {
-    if proofs.is_empty() {
-        return Ok(());
-    }
-
-    info!(
-        "Delivering batch of {} proofs (first key: {:?})",
-        proofs.len(),
-        proofs.first().map(|p| hex::encode(&p.key))
-    );
-
-    RootSmith::deliver_once(proof_delivery, &proofs).await
-}
-
-/// Process DB prune cycle: prune committed records from storage.
-async fn process_db_prune(
-    storage: &StorageArc,
-    committed_records: &CommittedRecordsList,
-) -> Result<usize> {
-    RootSmith::prune_once(storage, committed_records).await
-}
-
 /// Process archiving cycle: archive old records and commitments.
 async fn process_archiving_cycle(
     archive_storage: &ArchiveStorage,
@@ -394,7 +351,7 @@ impl RootSmith {
         let storage_handle = {
             let storage = Arc::clone(&storage);
             let active_namespaces = Arc::clone(&active_namespaces);
-            
+
             spawn_channel_consumer_task("storage_write", data_rx, move |record| {
                 let storage = Arc::clone(&storage);
                 let active_namespaces = Arc::clone(&active_namespaces);
@@ -544,7 +501,6 @@ impl RootSmith {
                 }
             })
         };
-
 
         // Skeleton tasks for future work
         let query_layer_handle = spawn_oneshot_task("query_layer", || async {
