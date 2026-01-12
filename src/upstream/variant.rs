@@ -1,6 +1,6 @@
 use super::{
-    http::HttpSource, kafka::KafkaSource, mock::MockUpstream, mqtt::MqttSource,
-    noop::NoopUpstream, sqs::SqsSource, websocket::WebSocketSource,
+    http::HttpSource, kafka::KafkaSource, mqtt::MqttSource, noop::NoopUpstream,
+    pubchannel::PubChannelUpstream, sqs::SqsSource, websocket::WebSocketSource,
 };
 use crate::config::UpstreamType;
 use crate::traits::UpstreamConnector;
@@ -17,7 +17,7 @@ pub enum UpstreamVariant {
     Sqs(SqsSource),
     Mqtt(MqttSource),
     Noop(NoopUpstream),
-    Mock(MockUpstream),
+    PubChannel(PubChannelUpstream),
 }
 
 impl UpstreamVariant {
@@ -43,7 +43,7 @@ impl UpstreamVariant {
                 "rootsmith".to_string(),
             )),
             UpstreamType::Noop => UpstreamVariant::Noop(NoopUpstream),
-            UpstreamType::Mock => UpstreamVariant::Mock(MockUpstream::default()),
+            UpstreamType::PubChannel => UpstreamVariant::PubChannel(PubChannelUpstream::default()),
         }
     }
 }
@@ -58,7 +58,7 @@ impl UpstreamConnector for UpstreamVariant {
             UpstreamVariant::Sqs(inner) => inner.name(),
             UpstreamVariant::Mqtt(inner) => inner.name(),
             UpstreamVariant::Noop(inner) => inner.name(),
-            UpstreamVariant::Mock(inner) => inner.name(),
+            UpstreamVariant::PubChannel(inner) => inner.name(),
         }
     }
 
@@ -70,7 +70,7 @@ impl UpstreamConnector for UpstreamVariant {
             UpstreamVariant::Sqs(inner) => inner.open(tx).await,
             UpstreamVariant::Mqtt(inner) => inner.open(tx).await,
             UpstreamVariant::Noop(inner) => inner.open(tx).await,
-            UpstreamVariant::Mock(inner) => inner.open(tx).await,
+            UpstreamVariant::PubChannel(inner) => inner.open(tx).await,
         }
     }
 
@@ -82,7 +82,7 @@ impl UpstreamConnector for UpstreamVariant {
             UpstreamVariant::Sqs(inner) => inner.close().await,
             UpstreamVariant::Mqtt(inner) => inner.close().await,
             UpstreamVariant::Noop(inner) => inner.close().await,
-            UpstreamVariant::Mock(inner) => inner.close().await,
+            UpstreamVariant::PubChannel(inner) => inner.close().await,
         }
     }
 }

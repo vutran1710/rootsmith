@@ -2,7 +2,7 @@ use ::rootsmith::*;
 use anyhow::Result;
 use kanal::unbounded_async;
 use ::rootsmith::types::{IncomingRecord, Value32};
-use ::rootsmith::upstream::{MockUpstream, UpstreamVariant};
+use ::rootsmith::upstream::{PubChannelUpstream, UpstreamVariant};
 
 // ===== Test Helper Functions =====
 
@@ -46,8 +46,8 @@ async fn test_run_upstream_task_success() -> Result<()> {
         test_record(3, 1002),
     ];
 
-    // Create mock upstream that sends records
-    let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 10));
+    // Create pubchannel upstream that sends records
+    let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records.clone(), 10));
 
     // Create channel
     let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
@@ -58,7 +58,7 @@ async fn test_run_upstream_task_success() -> Result<()> {
     });
 
     // Collect all records from channel
-    // Note: MockUpstream spawns a task, so we need to wait for records to arrive
+    // Note: PubChannelUpstream spawns a task, so we need to wait for records to arrive
     let mut received_records = Vec::new();
     let start = std::time::Instant::now();
     let timeout = std::time::Duration::from_secs(5);
@@ -84,7 +84,7 @@ async fn test_run_upstream_task_success() -> Result<()> {
         }
     }
 
-    // Give a bit more time for MockUpstream's spawned task to finish
+    // Give a bit more time for PubChannelUpstream's spawned task to finish
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     // Wait for task to complete
@@ -129,8 +129,8 @@ async fn test_run_upstream_task_success() -> Result<()> {
 async fn test_run_upstream_task_no_records() -> Result<()> {
     println!("\n=== Test: Upstream Task No Records ===\n");
 
-    // Create mock upstream with no records
-    let upstream = UpstreamVariant::Mock(MockUpstream::new(Vec::new(), 10));
+    // Create pubchannel upstream with no records
+    let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(Vec::new(), 10));
 
     // Create channel
     let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
@@ -140,7 +140,7 @@ async fn test_run_upstream_task_no_records() -> Result<()> {
         RootSmith::run_upstream_task(upstream, data_tx).await
     });
 
-    // Wait a bit for task to complete (MockUpstream returns immediately with no records)
+    // Wait a bit for task to complete (PubChannelUpstream returns immediately with no records)
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
 
     // Verify no records received
@@ -174,7 +174,7 @@ async fn test_run_upstream_task_multiple_batches() -> Result<()> {
     }
 
     // Create mock upstream with delay between batches
-    let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
+    let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records.clone(), 50));
 
     // Create channel
     let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
@@ -241,8 +241,8 @@ async fn test_run_upstream_task_channel_closed() -> Result<()> {
         test_record(2, 1001),
     ];
 
-    // Create mock upstream
-    let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records, 10));
+    // Create pubchannel upstream
+    let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records, 10));
 
     // Create channel and immediately close receiver
     let (data_tx, data_rx) = unbounded_async::<IncomingRecord>();
@@ -256,7 +256,7 @@ async fn test_run_upstream_task_channel_closed() -> Result<()> {
     // Wait for task to complete (should handle channel closure gracefully)
     let result = task_handle.await?;
 
-    // MockUpstream should handle channel closure without error
+    // PubChannelUpstream should handle channel closure without error
     // But if it does error, that's also acceptable behavior
     println!("Task result: {:?}", result);
     println!("✓ Upstream task handled channel closure\n");

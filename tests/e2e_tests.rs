@@ -4,7 +4,7 @@ use anyhow::Result;
 use ::rootsmith::commitment_registry::{CommitmentRegistryVariant, MockCommitmentRegistry};
 use ::rootsmith::config::AccumulatorType;
 use ::rootsmith::proof_registry::{MockProofRegistry, ProofRegistryVariant};
-use ::rootsmith::upstream::{MockUpstream, UpstreamVariant};
+use ::rootsmith::upstream::{PubChannelUpstream, UpstreamVariant};
 
 // ===== Test Helper Functions =====
 
@@ -66,7 +66,7 @@ async fn test_e2e_app_run() -> Result<()> {
     println!("Created {} test records", test_records.len());
 
     // Create mock components using the enum variants
-    let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
+    let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records.clone(), 50));
     let commitment_registry = MockCommitmentRegistry::new();
     let commitment_registry_clone = commitment_registry.clone();
     let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
@@ -167,7 +167,7 @@ async fn test_accumulator_type_configuration() -> Result<()> {
         }];
 
         // Create mock components
-        let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
+        let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records.clone(), 50));
         let commitment_registry = MockCommitmentRegistry::new();
         let commitment_registry_clone = commitment_registry.clone();
         let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);

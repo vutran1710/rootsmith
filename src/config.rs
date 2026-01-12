@@ -17,13 +17,13 @@ pub enum UpstreamType {
     Mqtt,
     /// No-op upstream (does nothing).
     Noop,
-    /// Mock upstream (for testing).
-    Mock,
+    /// Channel-based upstream (for testing and benchmarking).
+    PubChannel,
 }
 
 impl Default for UpstreamType {
     fn default() -> Self {
-        UpstreamType::Mock
+        UpstreamType::PubChannel
     }
 }
 

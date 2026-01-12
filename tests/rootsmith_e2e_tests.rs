@@ -8,7 +8,7 @@ use ::rootsmith::config::AccumulatorType;
 use ::rootsmith::proof_delivery::{MockDelivery, ProofDeliveryVariant};
 use ::rootsmith::proof_registry::{MockProofRegistry, ProofRegistryVariant};
 use ::rootsmith::types::Value32;
-use ::rootsmith::upstream::{MockUpstream, UpstreamVariant};
+use ::rootsmith::upstream::{PubChannelUpstream, UpstreamVariant};
 
 // ===== Test Helper Functions =====
 
@@ -126,7 +126,7 @@ async fn test_rootsmith_e2e_full_cycle() -> Result<()> {
     let archive_clone = mock_archive.clone();
     app.archive_storage = ArchiveStorageVariant::Mock(mock_archive);
     
-    app.upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
+    app.upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records.clone(), 50));
 
     println!("RootSmith initialized, starting run loop...");
 

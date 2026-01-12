@@ -4,19 +4,20 @@ use anyhow::Result;
 use async_trait::async_trait;
 use kanal::AsyncSender;
 
-/// Mock upstream connector for testing.
-pub struct MockUpstream {
+/// Channel-based upstream connector for testing and benchmarking.
+/// Publishes pre-configured records through a channel to the upstream receiver.
+pub struct PubChannelUpstream {
     pub records: Vec<IncomingRecord>,
     pub delay_ms: u64,
 }
 
-impl MockUpstream {
+impl PubChannelUpstream {
     pub fn new(records: Vec<IncomingRecord>, delay_ms: u64) -> Self {
         Self { records, delay_ms }
     }
 }
 
-impl Default for MockUpstream {
+impl Default for PubChannelUpstream {
     fn default() -> Self {
         Self {
             records: Vec::new(),
@@ -26,9 +27,9 @@ impl Default for MockUpstream {
 }
 
 #[async_trait]
-impl UpstreamConnector for MockUpstream {
+impl UpstreamConnector for PubChannelUpstream {
     fn name(&self) -> &'static str {
-        "mock-upstream"
+        "pubchannel-upstream"
     }
 
     async fn open(&mut self, tx: AsyncSender<IncomingRecord>) -> Result<()> {

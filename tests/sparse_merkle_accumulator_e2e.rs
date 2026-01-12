@@ -6,7 +6,7 @@ use ::rootsmith::config::AccumulatorType;
 use ::rootsmith::crypto::AccumulatorVariant;
 use ::rootsmith::proof_registry::{MockProofRegistry, ProofRegistryVariant};
 use ::rootsmith::traits::Accumulator;
-use ::rootsmith::upstream::{MockUpstream, UpstreamVariant};
+use ::rootsmith::upstream::{PubChannelUpstream, UpstreamVariant};
 
 // ===== Test Helper Functions =====
 
@@ -83,7 +83,7 @@ async fn test_sparse_merkle_e2e_basic_flow() -> Result<()> {
     println!("Created {} test records", test_records.len());
 
     // Create mock components
-    let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
+    let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records.clone(), 50));
     let commitment_registry = MockCommitmentRegistry::new();
     let commitment_registry_clone = commitment_registry.clone();
     let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
@@ -233,7 +233,7 @@ async fn test_sparse_merkle_key_updates() -> Result<()> {
         },
     ];
 
-    let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records_batch1.clone(), 50));
+    let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records_batch1.clone(), 50));
     let commitment_registry = MockCommitmentRegistry::new();
     let commitment_registry_clone = commitment_registry.clone();
     let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
@@ -392,7 +392,7 @@ async fn test_sparse_merkle_large_sparse_dataset() -> Result<()> {
 
     println!("Created {} test records", test_records.len());
 
-    let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
+    let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records.clone(), 50));
     let commitment_registry = MockCommitmentRegistry::new();
     let commitment_registry_clone = commitment_registry.clone();
     let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
@@ -497,7 +497,7 @@ async fn test_sparse_merkle_multiple_namespaces() -> Result<()> {
 
     println!("Created {} test records across 3 namespaces", test_records.len());
 
-    let upstream = UpstreamVariant::Mock(MockUpstream::new(test_records.clone(), 50));
+    let upstream = UpstreamVariant::PubChannel(PubChannelUpstream::new(test_records.clone(), 50));
     let commitment_registry = MockCommitmentRegistry::new();
     let commitment_registry_clone = commitment_registry.clone();
     let commitment_registry_variant = CommitmentRegistryVariant::Mock(commitment_registry);
