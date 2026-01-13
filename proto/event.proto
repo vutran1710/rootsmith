@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package rootsmith;
+
+// Event represents an arbitrary event that needs to be converted to IncomingRecord
+message Event {
+    // Event type identifier (e.g., "user.login", "transaction.created")
+    string event_type = 1;
+
+    // Event ID or transaction hash
+    string event_id = 2;
+
+    // Arbitrary data payload
+    bytes data = 3;
+
+    // Unix timestamp in seconds
+    uint64 timestamp = 4;
+
+    // Optional metadata
+    map<string, string> metadata = 5;
+}

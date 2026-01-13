@@ -10,6 +10,7 @@ use tokio::sync::Mutex;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
+use crate::parser::proto::parse_proto_message;
 use crate::traits::UpstreamConnector;
 use crate::types::IncomingRecord;
 
@@ -39,14 +40,9 @@ impl WebSocketSource {
         }
     }
 
-    /// Parse a text message into an IncomingRecord
-    fn parse_text_message(text: &str) -> Result<IncomingRecord> {
-        serde_json::from_str(text).context("Failed to parse text message as IncomingRecord")
-    }
-
-    /// Parse a binary message into an IncomingRecord
+    /// Parse a binary protobuf message into an IncomingRecord
     fn parse_binary_message(data: &[u8]) -> Result<IncomingRecord> {
-        serde_json::from_slice(data).context("Failed to parse binary message as IncomingRecord")
+        parse_proto_message(data)
     }
 
     /// Handle a single WebSocket message and forward it to the channel
@@ -55,23 +51,6 @@ impl WebSocketSource {
         tx: &AsyncSender<IncomingRecord>,
     ) -> MessageHandleResult {
         match msg {
-            Message::Text(text) => {
-                match Self::parse_text_message(&text) {
-                    Ok(record) => {
-                        if tx.send(record).await.is_err() {
-                            tracing::warn!("Channel closed, stopping WebSocket receiver");
-                            return MessageHandleResult::Break;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            "Failed to parse WebSocket message: {} - message: {}",
-                            e,
-                            text
-                        );
-                    }
-                }
-            }
             Message::Binary(data) => {
                 match Self::parse_binary_message(&data) {
                     Ok(record) => {
@@ -81,7 +60,7 @@ impl WebSocketSource {
                         }
                     }
                     Err(e) => {
-                        tracing::warn!("Failed to parse WebSocket binary message: {}", e);
+                        tracing::warn!("Failed to parse WebSocket protobuf message: {}", e);
                     }
                 }
             }
@@ -91,6 +70,9 @@ impl WebSocketSource {
             }
             Message::Ping(_) | Message::Pong(_) => {
                 // Handle ping/pong automatically by tokio-tungstenite
+            }
+            Message::Text(text) => {
+                tracing::warn!("Received unsupported Text message, only Binary protobuf is supported. Message: {}", text);
             }
             _ => {
                 tracing::debug!("Received unsupported WebSocket message type");
@@ -165,88 +147,76 @@ impl UpstreamConnector for WebSocketSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::parser::proto::proto;
+    use prost::Message as ProstMessage;
     use tokio_tungstenite::tungstenite::Message;
 
-    /// Helper function to create a valid IncomingRecord JSON for testing
-    fn create_valid_record_json() -> String {
-        // IncomingRecord has: namespace[32], key[32], value[32], timestamp(u64)
-        // Each 32-byte array needs to be serialized as an array of numbers
-        let namespace = vec![0u8; 32];
-        let key = vec![1u8; 32];
-        let value = vec![2u8; 32];
-
-        serde_json::json!({
-            "namespace": namespace,
-            "key": key,
-            "value": value,
-            "timestamp": 1234567890u64
-        })
-        .to_string()
+    /// Helper function to create a valid protobuf IncomingRecord for testing
+    fn create_valid_proto_record() -> proto::IncomingRecord {
+        proto::IncomingRecord {
+            namespace: vec![0u8; 32],
+            key: vec![1u8; 32],
+            value: vec![2u8; 32],
+            timestamp: 1234567890,
+        }
     }
 
-    #[test]
-    fn test_parse_text_message_valid() {
-        let json = create_valid_record_json();
-        let result = WebSocketSource::parse_text_message(&json);
-        assert!(result.is_ok());
-        let record = result.unwrap();
-        assert_eq!(record.timestamp, 1234567890);
-    }
-
-    #[test]
-    fn test_parse_text_message_invalid() {
-        let invalid_json = "not a valid json";
-        let result = WebSocketSource::parse_text_message(invalid_json);
-        assert!(result.is_err());
+    /// Helper to encode protobuf message to bytes
+    fn encode_proto(record: proto::IncomingRecord) -> Vec<u8> {
+        let mut buf = Vec::new();
+        record.encode(&mut buf).unwrap();
+        buf
     }
 
     #[test]
     fn test_parse_binary_message_valid() {
-        let json = create_valid_record_json();
-        let bytes = json.as_bytes();
-        let result = WebSocketSource::parse_binary_message(bytes);
+        let proto_record = create_valid_proto_record();
+        let bytes = encode_proto(proto_record);
+        let result = WebSocketSource::parse_binary_message(&bytes);
         assert!(result.is_ok());
         let record = result.unwrap();
         assert_eq!(record.timestamp, 1234567890);
+        assert_eq!(record.namespace, [0u8; 32]);
+        assert_eq!(record.key, [1u8; 32]);
+        assert_eq!(record.value, [2u8; 32]);
     }
 
     #[test]
     fn test_parse_binary_message_invalid() {
-        let invalid_bytes = b"not a valid json";
+        let invalid_bytes = b"not a valid protobuf";
         let result = WebSocketSource::parse_binary_message(invalid_bytes);
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn test_handle_message_text() {
+    async fn test_handle_message_binary() {
         let (tx, rx) = kanal::unbounded_async();
-        let json = create_valid_record_json();
-        let msg = Message::Text(json);
+        let proto_record = create_valid_proto_record();
+        let bytes = encode_proto(proto_record);
+        let msg = Message::Binary(bytes);
 
         let result = WebSocketSource::handle_message(msg, &tx).await;
 
-        // Should continue processing
         assert!(matches!(result, MessageHandleResult::Continue));
 
-        // Should have received the record
         let record = rx.recv().await;
         assert!(record.is_ok());
-        assert_eq!(record.unwrap().timestamp, 1234567890);
+        let record = record.unwrap();
+        assert_eq!(record.timestamp, 1234567890);
+        assert_eq!(record.namespace, [0u8; 32]);
+        assert_eq!(record.key, [1u8; 32]);
+        assert_eq!(record.value, [2u8; 32]);
     }
 
     #[tokio::test]
-    async fn test_handle_message_binary() {
-        let (tx, rx) = kanal::unbounded_async();
-        let json = create_valid_record_json();
-        let msg = Message::Binary(json.as_bytes().to_vec());
+    async fn test_handle_message_text_unsupported() {
+        let (tx, _rx) = kanal::unbounded_async();
+        let msg = Message::Text("some text".to_string());
 
         let result = WebSocketSource::handle_message(msg, &tx).await;
 
+        // Should continue (but logs warning)
         assert!(matches!(result, MessageHandleResult::Continue));
-
-        let record = rx.recv().await;
-        assert!(record.is_ok());
-        assert_eq!(record.unwrap().timestamp, 1234567890);
     }
 
     #[tokio::test]
@@ -283,24 +253,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_handle_message_invalid_text() {
-        let (tx, _rx) = kanal::unbounded_async();
-        let msg = Message::Text("invalid json".to_string());
-
-        let result = WebSocketSource::handle_message(msg, &tx).await;
-
-        // Should continue even with invalid message (it logs warning and continues)
-        assert!(matches!(result, MessageHandleResult::Continue));
-    }
-
-    #[tokio::test]
     async fn test_handle_message_invalid_binary() {
         let (tx, _rx) = kanal::unbounded_async();
-        let msg = Message::Binary(b"invalid json".to_vec());
+        let msg = Message::Binary(b"invalid protobuf data".to_vec());
 
         let result = WebSocketSource::handle_message(msg, &tx).await;
 
-        // Should continue even with invalid message
+        // Should continue even with invalid message (logs warning and continues)
         assert!(matches!(result, MessageHandleResult::Continue));
     }
 
