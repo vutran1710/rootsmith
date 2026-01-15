@@ -85,7 +85,7 @@ impl Storage {
         let mut batch = WriteBatch::default();
         for record in records {
             let k = Self::encode_key(&record.namespace, record.timestamp, &record.key);
-            batch.put(k, &record.value);
+            batch.put(k, record.value);
         }
         self.db.write(batch)?;
         Ok(())
