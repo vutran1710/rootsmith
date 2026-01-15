@@ -31,13 +31,11 @@ pub enum DownstreamType {
     S3,
     /// Blackhole downstream (discards data).
     Blackhole,
-    /// Mock downstream (for testing).
-    Mock,
 }
 
 impl Default for DownstreamType {
     fn default() -> Self {
-        DownstreamType::Mock
+        DownstreamType::Blackhole
     }
 }
 

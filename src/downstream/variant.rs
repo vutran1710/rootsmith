@@ -4,7 +4,6 @@ use kanal::AsyncSender;
 
 use super::blackhole::BlackholeDownstream;
 use super::channel::ChannelDownstream;
-use super::mock::MockDownstream;
 use super::s3::S3Downstream;
 use crate::config::DownstreamType;
 use crate::traits::Downstream;
@@ -15,7 +14,6 @@ pub enum DownstreamVariant {
     S3(S3Downstream),
     Blackhole(BlackholeDownstream),
     Channel(ChannelDownstream),
-    Mock(MockDownstream),
 }
 
 impl DownstreamVariant {
@@ -26,7 +24,6 @@ impl DownstreamVariant {
                 DownstreamVariant::S3(S3Downstream::new("rootsmith-results".to_string(), "us-east-1".to_string()))
             }
             DownstreamType::Blackhole => DownstreamVariant::Blackhole(BlackholeDownstream::new()),
-            DownstreamType::Mock => DownstreamVariant::Mock(MockDownstream::new()),
         }
     }
 
@@ -43,7 +40,6 @@ impl Downstream for DownstreamVariant {
             DownstreamVariant::S3(inner) => inner.name(),
             DownstreamVariant::Blackhole(inner) => inner.name(),
             DownstreamVariant::Channel(inner) => inner.name(),
-            DownstreamVariant::Mock(inner) => inner.name(),
         }
     }
 
@@ -52,7 +48,6 @@ impl Downstream for DownstreamVariant {
             DownstreamVariant::S3(inner) => inner.handle(result).await,
             DownstreamVariant::Blackhole(inner) => inner.handle(result).await,
             DownstreamVariant::Channel(inner) => inner.handle(result).await,
-            DownstreamVariant::Mock(inner) => inner.handle(result).await,
         }
     }
 }

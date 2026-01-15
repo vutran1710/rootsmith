@@ -23,7 +23,6 @@ pub use config::DownstreamType;
 pub use config::UpstreamType;
 pub use crypto::AccumulatorVariant;
 pub use downstream::DownstreamVariant;
-pub use downstream::MockDownstream;
 pub use proof_delivery::MockDelivery;
 pub use proof_delivery::ProofDeliveryVariant;
 pub use rootsmith::CommittedRecord;
