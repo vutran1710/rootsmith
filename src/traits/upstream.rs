@@ -24,10 +24,3 @@ pub trait UpstreamConnector: Send + Sync {
     /// Close/stop the connector and release resources.
     async fn close(&mut self) -> Result<()>;
 }
-
-/// Single leaf that gets fed into the accumulator.
-#[derive(Debug, Clone, Copy)]
-pub struct Leaf {
-    pub key: crate::types::Key32,
-    pub value: crate::types::Value32,
-}

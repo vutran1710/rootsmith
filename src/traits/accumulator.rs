@@ -1,6 +1,5 @@
 use anyhow::Result;
 
-use super::Leaf;
 use crate::types::Key32;
 use crate::types::Proof;
 use crate::types::Value32;
@@ -13,12 +12,6 @@ pub trait Accumulator: Send + Sync {
     /// Identifier for logging/telemetry (e.g. "merkle", "sparse-merkle").
     fn id(&self) -> &'static str;
     fn put(&mut self, key: Key32, value: Value32) -> Result<()>;
-    fn put_many(&mut self, items: &[Leaf]) -> Result<()> {
-        for leaf in items {
-            self.put(leaf.key, leaf.value)?;
-        }
-        Ok(())
-    }
     fn build_root(&self) -> Result<Vec<u8>>; // fixed 32-byte ???
     fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool>;
 
