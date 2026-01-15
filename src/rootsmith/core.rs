@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use tracing::info;
@@ -73,7 +75,10 @@ impl RootSmith {
         config: BaseConfig,
         storage: Storage,
     ) -> Self {
-        let now = crate::rootsmith::tasks::now_secs();
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time is before UNIX_EPOCH")
+            .as_secs();
 
         Self {
             upstream,
