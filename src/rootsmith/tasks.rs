@@ -92,6 +92,44 @@ pub async fn run_upstream_task(
     Ok(())
 }
 
+// ==================== COMMIT CYCLE FUNCTIONS ====================
+
+/// Check if enough time has elapsed for a commit cycle.
+///
+/// Returns true if `batch_interval_secs` has passed since `epoch_start_ts`.
+pub fn should_commit(epoch_start: u64, batch_interval_secs: u64) -> bool {
+    let now = now_secs();
+    let elapsed = now.saturating_sub(epoch_start);
+    elapsed >= batch_interval_secs
+}
+
+/// Calculate the committed_at timestamp based on epoch start and interval.
+pub fn calculate_committed_at(epoch_start: u64, batch_interval_secs: u64) -> u64 {
+    epoch_start + batch_interval_secs
+}
+
+/// Reset the epoch to current time.
+pub async fn reset_epoch(epoch_start_ts: &Arc<tokio::sync::Mutex<u64>>) {
+    let mut epoch_start = epoch_start_ts.lock().await;
+    *epoch_start = now_secs();
+}
+
+/// Get list of active namespaces and clear the map.
+pub async fn extract_active_namespaces(
+    active_namespaces: &Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>,
+) -> Vec<Namespace> {
+    let ns = active_namespaces.lock().await;
+    ns.keys().copied().collect()
+}
+
+/// Clear the active namespaces map.
+pub async fn clear_active_namespaces(
+    active_namespaces: &Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>,
+) {
+    let mut ns = active_namespaces.lock().await;
+    ns.clear();
+}
+
 /// Process a single commit cycle: check if commit is needed, commit all active namespaces, and reset epoch.
 ///
 /// Returns `Ok(true)` if a commit was performed, `Ok(false)` if not yet time.
@@ -106,30 +144,18 @@ pub async fn process_commit_cycle(
     accumulator_type: AccumulatorType,
 ) -> Result<bool> {
     // Check if it's time to commit
-    let should_commit = {
-        let epoch_start = *epoch_start_ts.lock().await;
-        let now = now_secs();
-        let elapsed = now.saturating_sub(epoch_start);
-        elapsed >= batch_interval_secs
-    };
-
-    if !should_commit {
+    let epoch_start = *epoch_start_ts.lock().await;
+    if !should_commit(epoch_start, batch_interval_secs) {
         return Ok(false);
     }
 
     info!("Commit phase starting");
 
     // Get list of active namespaces
-    let namespaces: Vec<Namespace> = {
-        let ns = active_namespaces.lock().await;
-        ns.keys().copied().collect()
-    };
+    let namespaces = extract_active_namespaces(active_namespaces).await;
 
     if !namespaces.is_empty() {
-        let committed_at = {
-            let epoch_start = *epoch_start_ts.lock().await;
-            epoch_start + batch_interval_secs
-        };
+        let committed_at = calculate_committed_at(epoch_start, batch_interval_secs);
 
         info!("Committing {} namespaces", namespaces.len());
 
@@ -156,23 +182,14 @@ pub async fn process_commit_cycle(
         }
 
         // Reset epoch and clear active namespaces
-        {
-            let mut epoch_start = epoch_start_ts.lock().await;
-            *epoch_start = now_secs();
-        }
-        {
-            let mut ns = active_namespaces.lock().await;
-            ns.clear();
-        }
+        reset_epoch(epoch_start_ts).await;
+        clear_active_namespaces(active_namespaces).await;
 
         info!("Commit phase completed");
     } else {
         debug!("No active namespaces to commit");
         // Still update epoch start to avoid spinning
-        {
-            let mut epoch_start = epoch_start_ts.lock().await;
-            *epoch_start = now_secs();
-        }
+        reset_epoch(epoch_start_ts).await;
     }
 
     Ok(true)
@@ -188,53 +205,87 @@ async fn commit_namespace(
     commit_tx: &AsyncSender<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>,
     accumulator_type: AccumulatorType,
 ) -> Result<()> {
-    // Scan storage for records in this namespace up to committed_at
-    let (root, record_count, records_to_track, records_for_proof) = {
-        let storage_guard = storage.lock().await;
+    // Scan storage and build accumulator
+    let (root, record_count, records_to_track, records_for_proof) =
+        scan_and_build_accumulator(storage, namespace, committed_at, accumulator_type).await?;
 
-        let filter = StorageScanFilter {
-            namespace: *namespace,
-            timestamp: Some(committed_at),
-        };
-        let records = storage_guard.scan(&filter)?;
+    if record_count == 0 {
+        return Ok(());
+    }
 
-        if records.is_empty() {
-            debug!("No records to commit for namespace {:?}", namespace);
-            return Ok(());
-        }
+    // Send commitment to downstream
+    send_commitment_to_downstream(downstream, &root, committed_at, *namespace, record_count).await?;
 
-        info!(
-            "Committing {} records for namespace {:?}",
-            records.len(),
-            namespace
-        );
+    // Track records for pruning
+    track_committed_records(committed_records, records_to_track).await;
 
-        // Build accumulator from records
-        let mut accumulator = AccumulatorVariant::new(accumulator_type);
+    // Notify proof task about new commitment
+    notify_proof_task(commit_tx, *namespace, root, committed_at, records_for_proof).await;
 
-        let mut records_to_track = Vec::new();
-        let mut records_for_proof = Vec::new();
+    Ok(())
+}
 
-        for record in &records {
-            accumulator.put(record.key, record.value)?;
-            records_to_track.push(CommittedRecord {
-                namespace: record.namespace,
-                key: record.key,
-                value: record.value,
-                timestamp: record.timestamp,
-            });
-            records_for_proof.push((record.key, record.value));
-        }
+/// Scan storage for records and build accumulator.
+///
+/// Returns (root, record_count, records_to_track, records_for_proof).
+async fn scan_and_build_accumulator(
+    storage: &Arc<tokio::sync::Mutex<Storage>>,
+    namespace: &Namespace,
+    committed_at: u64,
+    accumulator_type: AccumulatorType,
+) -> Result<(Vec<u8>, usize, Vec<CommittedRecord>, Vec<(Key32, Value32)>)> {
+    let storage_guard = storage.lock().await;
 
-        let root = accumulator.build_root()?;
-        let record_count = records.len();
-
-        (root, record_count, records_to_track, records_for_proof)
+    let filter = StorageScanFilter {
+        namespace: *namespace,
+        timestamp: Some(committed_at),
     };
+    let records = storage_guard.scan(&filter)?;
 
-    // Create CommitmentResult and send to downstream
+    if records.is_empty() {
+        debug!("No records to commit for namespace {:?}", namespace);
+        return Ok((Vec::new(), 0, Vec::new(), Vec::new()));
+    }
+
+    info!(
+        "Committing {} records for namespace {:?}",
+        records.len(),
+        namespace
+    );
+
+    // Build accumulator from records
+    let mut accumulator = AccumulatorVariant::new(accumulator_type);
+
+    let mut records_to_track = Vec::new();
+    let mut records_for_proof = Vec::new();
+
+    for record in &records {
+        accumulator.put(record.key, record.value)?;
+        records_to_track.push(CommittedRecord {
+            namespace: record.namespace,
+            key: record.key,
+            value: record.value,
+            timestamp: record.timestamp,
+        });
+        records_for_proof.push((record.key, record.value));
+    }
+
+    let root = accumulator.build_root()?;
+    let record_count = records.len();
+
+    Ok((root, record_count, records_to_track, records_for_proof))
+}
+
+/// Send commitment result to downstream.
+async fn send_commitment_to_downstream(
+    downstream: &Arc<tokio::sync::Mutex<DownstreamVariant>>,
+    root: &[u8],
+    committed_at: u64,
+    namespace: Namespace,
+    record_count: usize,
+) -> Result<()> {
     let result = CommitmentResult {
-        commitment: root.clone(),
+        commitment: root.to_vec(),
         proofs: None,
         committed_at,
     };
@@ -248,20 +299,133 @@ async fn commit_namespace(
         root.len()
     );
 
-    // Track records for pruning
-    {
-        let mut committed = committed_records.lock().await;
-        committed.extend(records_to_track);
-    }
+    Ok(())
+}
 
-    // Notify proof task about new commitment
+/// Track committed records for later pruning.
+async fn track_committed_records(
+    committed_records: &Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>,
+    records_to_track: Vec<CommittedRecord>,
+) {
+    let mut committed = committed_records.lock().await;
+    committed.extend(records_to_track);
+}
+
+/// Notify proof task about a new commitment.
+async fn notify_proof_task(
+    commit_tx: &AsyncSender<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>,
+    namespace: Namespace,
+    root: Vec<u8>,
+    committed_at: u64,
+    records_for_proof: Vec<(Key32, Value32)>,
+) {
     if let Err(e) = commit_tx
-        .send((*namespace, root.clone(), committed_at, records_for_proof))
+        .send((namespace, root, committed_at, records_for_proof))
         .await
     {
         error!("Failed to notify proof task about commitment: {}", e);
         // Don't fail the commit if proof notification fails
     }
+}
+
+// ==================== PROOF GENERATION FUNCTIONS ====================
+
+/// Build accumulator from key-value records.
+///
+/// Returns the populated accumulator, skipping any records that fail to insert.
+fn build_accumulator_from_records(
+    records: &[(Key32, Value32)],
+    accumulator_type: AccumulatorType,
+) -> AccumulatorVariant {
+    let mut accumulator = AccumulatorVariant::new(accumulator_type);
+    for (key, value) in records {
+        if let Err(e) = accumulator.put(*key, *value) {
+            error!("Failed to insert key into accumulator: {}", e);
+            continue;
+        }
+    }
+    accumulator
+}
+
+/// Generate proofs for all keys using the accumulator.
+///
+/// Returns (stored_proofs, proof_map) where proof_map is used for downstream.
+fn generate_proofs_for_keys(
+    accumulator: &mut AccumulatorVariant,
+    records: &[(Key32, Value32)],
+    root: &[u8],
+    namespace: Namespace,
+    committed_at: u64,
+) -> (Vec<StoredProof>, HashMap<Key32, Vec<u8>>) {
+    let mut stored_proofs = Vec::new();
+    let mut proof_map = HashMap::new();
+
+    for (key, _value) in records {
+        match accumulator.prove(key) {
+            Ok(Some(proof)) => {
+                // Serialize proof to bytes
+                let proof_bytes = match serde_json::to_vec(&proof) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        error!("Failed to serialize proof: {}", e);
+                        continue;
+                    }
+                };
+
+                let stored_proof = StoredProof {
+                    root: root.to_vec(),
+                    proof: proof_bytes.clone(),
+                    key: *key,
+                    meta: serde_json::json!({
+                        "namespace": hex::encode(namespace),
+                        "committed_at": committed_at,
+                    }),
+                };
+                stored_proofs.push(stored_proof);
+                proof_map.insert(*key, proof_bytes);
+            }
+            Ok(None) => {
+                debug!("No proof available for key {:?}", key);
+            }
+            Err(e) => {
+                error!("Failed to generate proof for key {:?}: {}", key, e);
+            }
+        }
+    }
+
+    (stored_proofs, proof_map)
+}
+
+/// Send proofs to downstream and notify delivery task.
+async fn send_proofs_to_downstream_and_delivery(
+    downstream: &Arc<tokio::sync::Mutex<DownstreamVariant>>,
+    proof_delivery_tx: &AsyncSender<Vec<StoredProof>>,
+    proof_map: HashMap<Key32, Vec<u8>>,
+    stored_proofs: Vec<StoredProof>,
+    root: Vec<u8>,
+    committed_at: u64,
+    namespace: Namespace,
+) -> Result<()> {
+    let result = CommitmentResult {
+        commitment: root,
+        proofs: Some(proof_map.clone()),
+        committed_at,
+    };
+
+    // Send to downstream
+    let ds = downstream.lock().await;
+    ds.handle(&result).await?;
+    info!(
+        "Sent {} proofs for namespace {:?} to downstream",
+        proof_map.len(),
+        namespace
+    );
+
+    // Notify delivery task about saved proofs
+    proof_delivery_tx
+        .send(stored_proofs)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to send proofs to delivery task: {}", e))?;
 
     Ok(())
 }
@@ -285,72 +449,25 @@ pub async fn process_proof_generation(
     );
 
     // Build accumulator from committed records
-    let mut accumulator = AccumulatorVariant::new(accumulator_type);
-    for (key, value) in &records {
-        if let Err(e) = accumulator.put(*key, *value) {
-            error!("Failed to insert key into accumulator: {}", e);
-            continue;
-        }
-    }
+    let mut accumulator = build_accumulator_from_records(&records, accumulator_type);
 
     // Generate proofs for all records
-    let mut stored_proofs = Vec::new();
-    let mut proof_map = HashMap::new();
-    for (key, _value) in &records {
-        match accumulator.prove(key) {
-            Ok(Some(proof)) => {
-                // Serialize proof to bytes
-                let proof_bytes = match serde_json::to_vec(&proof) {
-                    Ok(bytes) => bytes,
-                    Err(e) => {
-                        error!("Failed to serialize proof: {}", e);
-                        continue;
-                    }
-                };
-
-                let stored_proof = StoredProof {
-                    root: root.clone(),
-                    proof: proof_bytes.clone(),
-                    key: *key,
-                    meta: serde_json::json!({
-                        "namespace": hex::encode(namespace),
-                        "committed_at": committed_at,
-                    }),
-                };
-                stored_proofs.push(stored_proof);
-                proof_map.insert(*key, proof_bytes);
-            }
-            Ok(None) => {
-                debug!("No proof available for key {:?}", key);
-            }
-            Err(e) => {
-                error!("Failed to generate proof for key {:?}: {}", key, e);
-            }
-        }
-    }
+    let (stored_proofs, proof_map) =
+        generate_proofs_for_keys(&mut accumulator, &records, &root, namespace, committed_at);
 
     // Create CommitmentResult with proofs
     let proof_count = proof_map.len();
     if !proof_map.is_empty() {
-        let result = CommitmentResult {
-            commitment: root.clone(),
-            proofs: Some(proof_map),
+        send_proofs_to_downstream_and_delivery(
+            downstream,
+            proof_delivery_tx,
+            proof_map,
+            stored_proofs,
+            root,
             committed_at,
-        };
-
-        // Send to downstream
-        let ds = downstream.lock().await;
-        ds.handle(&result).await?;
-        info!(
-            "Sent {} proofs for namespace {:?} to downstream",
-            proof_count, namespace
-        );
-
-        // Notify delivery task about saved proofs
-        proof_delivery_tx
-            .send(stored_proofs)
-            .await
-            .map_err(|e| anyhow::anyhow!("Failed to send proofs to delivery task: {}", e))?;
+            namespace,
+        )
+        .await?;
     } else {
         debug!("No proofs to save for namespace {:?}", namespace);
     }

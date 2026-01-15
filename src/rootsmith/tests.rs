@@ -577,3 +577,64 @@ async fn test_prune_once_multiple_namespaces() -> Result<()> {
 
     Ok(())
 }
+
+// ==================== TESTS: Helper Functions ====================
+
+#[test]
+fn test_should_commit_true() {
+    let epoch_start = 1000;
+    let batch_interval = 60;
+    // Time has passed
+    assert!(tasks::should_commit(epoch_start, batch_interval));
+}
+
+#[test]
+fn test_should_commit_false() {
+    let now = tasks::now_secs();
+    let epoch_start = now - 10; // Started 10 seconds ago
+    let batch_interval = 60; // Need 60 seconds
+    assert!(!tasks::should_commit(epoch_start, batch_interval));
+}
+
+#[test]
+fn test_calculate_committed_at() {
+    let epoch_start = 1000;
+    let batch_interval = 60;
+    let committed_at = tasks::calculate_committed_at(epoch_start, batch_interval);
+    assert_eq!(committed_at, 1060);
+}
+
+#[tokio::test]
+async fn test_reset_epoch() {
+    let before = tasks::now_secs();
+    let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(100)); // Old timestamp
+    
+    tasks::reset_epoch(&epoch_start_ts).await;
+    
+    let after = *epoch_start_ts.lock().await;
+    assert!(after >= before, "Epoch should be reset to current time");
+}
+
+#[tokio::test]
+async fn test_extract_active_namespaces() {
+    let mut map = HashMap::new();
+    map.insert(test_namespace(1), true);
+    map.insert(test_namespace(2), true);
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(map));
+    
+    let namespaces = tasks::extract_active_namespaces(&active_namespaces).await;
+    
+    assert_eq!(namespaces.len(), 2);
+}
+
+#[tokio::test]
+async fn test_clear_active_namespaces() {
+    let mut map = HashMap::new();
+    map.insert(test_namespace(1), true);
+    let active_namespaces = Arc::new(tokio::sync::Mutex::new(map));
+    
+    tasks::clear_active_namespaces(&active_namespaces).await;
+    
+    let active = active_namespaces.lock().await;
+    assert!(active.is_empty());
+}
