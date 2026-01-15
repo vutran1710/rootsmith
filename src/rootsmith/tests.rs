@@ -1,7 +1,7 @@
 //! Unit tests for RootSmith business logic.
 //!
-//! These tests focus on the "*_once" functions which contain pure business logic
-//! without tokio::spawn, making them easy to test.
+//! These tests focus on the stateless business logic functions in tasks.rs,
+//! making them easy to test without tokio::spawn complexity.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -10,9 +10,8 @@ use anyhow::Result;
 use kanal::unbounded_async;
 
 use super::core::CommittedRecord;
-use super::core::RootSmith;
+use super::tasks;
 use crate::config::AccumulatorType;
-use crate::config::BaseConfig;
 use crate::downstream::DownstreamVariant;
 use crate::proof_delivery::MockDelivery;
 use crate::proof_delivery::ProofDeliveryVariant;
@@ -74,7 +73,7 @@ async fn test_storage_write_once_success() -> Result<()> {
     let record = test_record(1, 1, 1);
 
     // Write once
-    RootSmith::storage_write_once(&storage, &active_namespaces, &record).await?;
+    tasks::storage_write_once(&storage, &active_namespaces, &record).await?;
 
     // Verify record was persisted
     {
@@ -103,8 +102,8 @@ async fn test_storage_write_once_multiple_namespaces() -> Result<()> {
     let record1 = test_record(1, 1, 1);
     let record2 = test_record(2, 1, 1);
 
-    RootSmith::storage_write_once(&storage, &active_namespaces, &record1).await?;
-    RootSmith::storage_write_once(&storage, &active_namespaces, &record2).await?;
+    tasks::storage_write_once(&storage, &active_namespaces, &record1).await?;
+    tasks::storage_write_once(&storage, &active_namespaces, &record2).await?;
 
     // Both namespaces should be active
     {
@@ -140,7 +139,7 @@ async fn test_process_commit_cycle_not_ready() -> Result<()> {
     let batch_interval_secs = 60;
 
     // Should return false - not enough time elapsed
-    let result = RootSmith::process_commit_cycle(
+    let result = tasks::process_commit_cycle(
         &epoch_start_ts,
         &active_namespaces,
         &storage,
@@ -180,7 +179,7 @@ async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
     let batch_interval_secs = 60;
 
     // Should return true (processed), but no commitment since no namespaces
-    let result = RootSmith::process_commit_cycle(
+    let result = tasks::process_commit_cycle(
         &epoch_start_ts,
         &active_namespaces,
         &storage,
@@ -256,7 +255,7 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
     let batch_interval_secs = 60;
 
     // Should commit
-    let result = RootSmith::process_commit_cycle(
+    let result = tasks::process_commit_cycle(
         &epoch_start_ts,
         &active_namespaces,
         &storage_arc,
@@ -340,7 +339,7 @@ async fn test_process_proof_generation_success() -> Result<()> {
     let (proof_delivery_tx, proof_delivery_rx) = unbounded_async::<Vec<StoredProof>>();
 
     // Generate proofs
-    let proof_count = RootSmith::process_proof_generation(
+    let proof_count = tasks::process_proof_generation(
         namespace,
         root.clone(),
         committed_at,
@@ -389,7 +388,7 @@ async fn test_process_proof_generation_empty_records() -> Result<()> {
     let (proof_delivery_tx, _proof_delivery_rx) = unbounded_async::<Vec<StoredProof>>();
 
     // Generate proofs with empty records
-    let proof_count = RootSmith::process_proof_generation(
+    let proof_count = tasks::process_proof_generation(
         namespace,
         root,
         committed_at,
@@ -430,7 +429,7 @@ async fn test_deliver_once_success() -> Result<()> {
         },
     ];
 
-    RootSmith::deliver_once(&proof_delivery, &proofs).await?;
+    tasks::deliver_once(&proof_delivery, &proofs).await?;
 
     // Verify proofs were delivered
     let delivered = delivery_clone.get_delivered();
@@ -449,7 +448,7 @@ async fn test_deliver_once_empty_batch() -> Result<()> {
 
     let proofs: Vec<StoredProof> = vec![];
 
-    RootSmith::deliver_once(&proof_delivery, &proofs).await?;
+    tasks::deliver_once(&proof_delivery, &proofs).await?;
 
     // Verify no proofs were delivered
     let delivered = delivery_clone.get_delivered();
@@ -467,7 +466,7 @@ async fn test_prune_once_no_records() -> Result<()> {
     let storage = Arc::new(tokio::sync::Mutex::new(storage));
     let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
 
-    let pruned = RootSmith::prune_once(&storage, &committed_records).await?;
+    let pruned = tasks::prune_once(&storage, &committed_records).await?;
 
     assert_eq!(pruned, 0, "Should prune 0 records");
 
@@ -510,7 +509,7 @@ async fn test_prune_once_with_records() -> Result<()> {
     let committed_records = Arc::new(tokio::sync::Mutex::new(committed_records_list));
 
     // Prune
-    let pruned = RootSmith::prune_once(&storage_arc, &committed_records).await?;
+    let pruned = tasks::prune_once(&storage_arc, &committed_records).await?;
 
     assert_eq!(pruned, 3, "Should prune 3 records");
 
@@ -572,7 +571,7 @@ async fn test_prune_once_multiple_namespaces() -> Result<()> {
     let committed_records = Arc::new(tokio::sync::Mutex::new(committed_records_list));
 
     // Prune
-    let pruned = RootSmith::prune_once(&storage_arc, &committed_records).await?;
+    let pruned = tasks::prune_once(&storage_arc, &committed_records).await?;
 
     assert_eq!(pruned, 4, "Should prune 4 records (2 per namespace)");
 
