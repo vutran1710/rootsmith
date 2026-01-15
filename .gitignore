@@ -3,3 +3,9 @@ Cargo.lock
 *.db
 *.log
 data/
+# OS
+.DS_Store
+
+# Large artifacts (download via scripts/download-artifacts.sh)
+artifacts/*.zkey
+artifacts/*.bin

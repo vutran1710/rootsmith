@@ -1,0 +1,19 @@
+syntax = "proto3";
+
+package rootsmith;
+
+// IncomingRecord represents a data unit from upstream connectors.
+// All byte arrays (namespace, key, value) should be exactly 32 bytes.
+message IncomingRecord {
+    // Namespace identifier (32 bytes)
+    bytes namespace = 1;
+
+    // Key identifier (32 bytes)
+    bytes key = 2;
+
+    // Value data (32 bytes)
+    bytes value = 3;
+
+    // Unix timestamp in seconds
+    uint64 timestamp = 4;
+}

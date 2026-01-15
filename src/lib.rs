@@ -5,6 +5,7 @@ pub mod commitment_registry;
 pub mod config;
 pub mod crypto;
 pub mod feature_select;
+pub mod parser;
 pub mod proof_delivery;
 pub mod proof_registry;
 pub mod rootsmith;
