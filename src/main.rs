@@ -3,12 +3,11 @@ use clap::Parser;
 use tracing::info;
 
 mod archive;
-mod commitment_registry;
 mod config;
 mod crypto;
+mod downstream;
 mod feature_select;
 mod proof_delivery;
-mod proof_registry;
 mod rootsmith;
 mod storage;
 mod telemetry;

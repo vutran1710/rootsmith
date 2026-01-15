@@ -23,41 +23,19 @@ impl Default for UpstreamType {
     }
 }
 
-/// Type of commitment registry to use.
+/// Type of downstream handler to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
-pub enum CommitmentRegistryType {
-    /// Smart contract commitment registry.
-    Contract,
-    /// No-op commitment registry (does nothing).
-    Noop,
-    /// Mock commitment registry (for testing).
-    Mock,
-}
-
-impl Default for CommitmentRegistryType {
-    fn default() -> Self {
-        CommitmentRegistryType::Mock
-    }
-}
-
-/// Type of proof registry to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
-#[serde(rename_all = "kebab-case")]
-pub enum ProofRegistryType {
-    /// S3 proof registry.
+pub enum DownstreamType {
+    /// S3 downstream.
     S3,
-    /// GitHub proof registry.
-    Github,
-    /// No-op proof registry (does nothing).
-    Noop,
-    /// Mock proof registry (for testing).
-    Mock,
+    /// Blackhole downstream (discards data).
+    Blackhole,
 }
 
-impl Default for ProofRegistryType {
+impl Default for DownstreamType {
     fn default() -> Self {
-        ProofRegistryType::Mock
+        DownstreamType::Blackhole
     }
 }
 

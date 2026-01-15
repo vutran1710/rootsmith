@@ -12,24 +12,19 @@ use tracing::error;
 use tracing::info;
 
 use crate::archive::ArchiveStorageVariant;
-use crate::commitment_registry::CommitmentRegistryVariant;
 use crate::config::AccumulatorType;
 use crate::config::BaseConfig;
 use crate::crypto::AccumulatorVariant;
+use crate::downstream::DownstreamVariant;
 use crate::proof_delivery::ProofDeliveryVariant;
-use crate::proof_registry::ProofRegistryVariant;
 use crate::storage::Storage;
 use crate::storage::StorageDeleteFilter;
 use crate::storage::StorageScanFilter;
 use crate::traits::Accumulator;
-use crate::traits::ArchiveData;
-use crate::traits::ArchiveStorage;
-use crate::traits::CommitmentRegistry;
+use crate::traits::Downstream;
 use crate::traits::ProofDelivery;
-use crate::traits::ProofRegistry;
 use crate::traits::UpstreamConnector;
-use crate::types::BatchCommitmentMeta;
-use crate::types::Commitment;
+use crate::types::CommitmentResult;
 use crate::types::IncomingRecord;
 use crate::types::Key32;
 use crate::types::Namespace;
@@ -60,11 +55,8 @@ pub struct RootSmith {
     /// Upstream connector.
     pub upstream: UpstreamVariant,
 
-    /// Commitment registry implementation.
-    pub commitment_registry: CommitmentRegistryVariant,
-
-    /// Proof registry implementation.
-    pub proof_registry: ProofRegistryVariant,
+    /// Downstream handler for commitment results.
+    pub downstream: DownstreamVariant,
 
     /// Proof delivery implementation.
     pub proof_delivery: ProofDeliveryVariant,
@@ -92,8 +84,7 @@ impl RootSmith {
     /// Create a new RootSmith.
     pub fn new(
         upstream: UpstreamVariant,
-        commitment_registry: CommitmentRegistryVariant,
-        proof_registry: ProofRegistryVariant,
+        downstream: DownstreamVariant,
         proof_delivery: ProofDeliveryVariant,
         archive_storage: ArchiveStorageVariant,
         config: BaseConfig,
@@ -103,8 +94,7 @@ impl RootSmith {
 
         Self {
             upstream,
-            commitment_registry,
-            proof_registry,
+            downstream,
             proof_delivery,
             archive_storage,
             config,
@@ -119,27 +109,23 @@ impl RootSmith {
     pub async fn initialize(config: BaseConfig) -> Result<Self> {
         use crate::archive::ArchiveStorageVariant;
         use crate::archive::NoopArchive;
-        use crate::commitment_registry::commitment_noop::CommitmentNoop;
-        use crate::commitment_registry::CommitmentRegistryVariant;
+        use crate::downstream::BlackholeDownstream;
+        use crate::downstream::DownstreamVariant;
         use crate::proof_delivery::NoopDelivery;
         use crate::proof_delivery::ProofDeliveryVariant;
-        use crate::proof_registry::NoopProofRegistry;
-        use crate::proof_registry::ProofRegistryVariant;
         use crate::upstream::NoopUpstream;
 
         let storage = Storage::open(&config.storage_path)?;
         info!("Storage opened at: {}", config.storage_path);
 
         let upstream = UpstreamVariant::Noop(NoopUpstream);
-        let commitment_registry = CommitmentRegistryVariant::Noop(CommitmentNoop::new());
-        let proof_registry = ProofRegistryVariant::Noop(NoopProofRegistry);
+        let downstream = DownstreamVariant::Blackhole(BlackholeDownstream::new());
         let proof_delivery = ProofDeliveryVariant::Noop(NoopDelivery);
         let archive_storage = ArchiveStorageVariant::Noop(NoopArchive);
 
         Ok(Self::new(
             upstream,
-            commitment_registry,
-            proof_registry,
+            downstream,
             proof_delivery,
             archive_storage,
             config,
@@ -201,7 +187,7 @@ impl RootSmith {
         active_namespaces: &Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>,
         storage: &Arc<tokio::sync::Mutex<Storage>>,
         committed_records: &Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: &Arc<tokio::sync::Mutex<CommitmentRegistryVariant>>,
+        downstream: &Arc<tokio::sync::Mutex<DownstreamVariant>>,
         commit_tx: &AsyncSender<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>,
         batch_interval_secs: u64,
         accumulator_type: AccumulatorType,
@@ -236,13 +222,12 @@ impl RootSmith {
 
             // Commit each namespace
             for namespace in namespaces {
-                let registry = commitment_registry.lock().await;
                 match Self::commit_namespace(
                     storage,
                     &namespace,
                     committed_at,
                     committed_records,
-                    &*registry,
+                    downstream,
                     commit_tx,
                     accumulator_type,
                 )
@@ -288,7 +273,7 @@ impl RootSmith {
         root: Vec<u8>,
         committed_at: u64,
         records: Vec<(Key32, Value32)>,
-        proof_registry: &Arc<tokio::sync::Mutex<ProofRegistryVariant>>,
+        downstream: &Arc<tokio::sync::Mutex<DownstreamVariant>>,
         proof_delivery_tx: &AsyncSender<Vec<StoredProof>>,
         accumulator_type: AccumulatorType,
     ) -> Result<usize> {
@@ -309,6 +294,7 @@ impl RootSmith {
 
         // Generate proofs for all records
         let mut stored_proofs = Vec::new();
+        let mut proof_map = HashMap::new();
         for (key, _value) in &records {
             match accumulator.prove(key) {
                 Ok(Some(proof)) => {
@@ -323,7 +309,7 @@ impl RootSmith {
 
                     let stored_proof = StoredProof {
                         root: root.clone(),
-                        proof: proof_bytes,
+                        proof: proof_bytes.clone(),
                         key: *key,
                         meta: serde_json::json!({
                             "namespace": hex::encode(namespace),
@@ -331,6 +317,7 @@ impl RootSmith {
                         }),
                     };
                     stored_proofs.push(stored_proof);
+                    proof_map.insert(*key, proof_bytes);
                 }
                 Ok(None) => {
                     debug!("No proof available for key {:?}", key);
@@ -341,15 +328,21 @@ impl RootSmith {
             }
         }
 
-        // Save proofs to proof registry
-        let proof_count = stored_proofs.len();
-        if !stored_proofs.is_empty() {
-            let registry = proof_registry.lock().await;
-            registry.save_proofs(&stored_proofs).await?;
+        // Create CommitmentResult with proofs
+        let proof_count = proof_map.len();
+        if !proof_map.is_empty() {
+            let result = CommitmentResult {
+                commitment: root.clone(),
+                proofs: Some(proof_map),
+                committed_at,
+            };
+
+            // Send to downstream
+            let ds = downstream.lock().await;
+            ds.handle(&result).await?;
             info!(
-                "Saved {} proofs for namespace {:?}",
-                stored_proofs.len(),
-                namespace
+                "Sent {} proofs for namespace {:?} to downstream",
+                proof_count, namespace
             );
 
             // Notify delivery task about saved proofs
@@ -450,7 +443,7 @@ impl RootSmith {
         namespace: &Namespace,
         committed_at: u64,
         committed_records: &Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>,
-        commitment_registry: &CommitmentRegistryVariant,
+        downstream: &Arc<tokio::sync::Mutex<DownstreamVariant>>,
         commit_tx: &AsyncSender<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>,
         accumulator_type: AccumulatorType,
     ) -> Result<()> {
@@ -498,19 +491,15 @@ impl RootSmith {
             (root, record_count, records_to_track, records_for_proof)
         };
 
-        // Create commitment and send to commitment registry
-        let commitment = Commitment {
-            namespace: *namespace,
-            root: root.clone(),
+        // Create CommitmentResult and send to downstream
+        let result = CommitmentResult {
+            commitment: root.clone(),
+            proofs: None,
             committed_at,
         };
 
-        let meta = BatchCommitmentMeta {
-            commitment,
-            leaf_count: record_count as u64,
-        };
-
-        commitment_registry.commit(&meta).await?;
+        let ds = downstream.lock().await;
+        ds.handle(&result).await?;
         info!(
             "Committed namespace {:?}: {} records, root len={}",
             namespace,
