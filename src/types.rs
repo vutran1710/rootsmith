@@ -69,3 +69,15 @@ pub struct StoredProof {
     pub key: Key32,
     pub meta: serde_json::Value,
 }
+
+/// Unified result containing commitment data and optional proofs.
+/// This is the output from RootSmith that gets sent to downstream.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitmentResult {
+    /// Commitment data as raw bytes
+    pub commitment: Vec<u8>,
+    /// Optional flat map of key to proof bytes
+    pub proofs: Option<HashMap<Key32, Vec<u8>>>,
+    /// Timestamp when committed
+    pub committed_at: u64,
+}

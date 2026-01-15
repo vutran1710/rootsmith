@@ -11,14 +11,12 @@ use kanal::unbounded_async;
 
 use super::core::CommittedRecord;
 use super::core::RootSmith;
-use crate::commitment_registry::CommitmentRegistryVariant;
-use crate::commitment_registry::MockCommitmentRegistry;
 use crate::config::AccumulatorType;
 use crate::config::BaseConfig;
+use crate::downstream::DownstreamVariant;
+use crate::downstream::MockDownstream;
 use crate::proof_delivery::MockDelivery;
 use crate::proof_delivery::ProofDeliveryVariant;
-use crate::proof_registry::MockProofRegistry;
-use crate::proof_registry::ProofRegistryVariant;
 use crate::storage::Storage;
 use crate::types::IncomingRecord;
 use crate::types::Key32;
@@ -130,8 +128,8 @@ async fn test_process_commit_cycle_not_ready() -> Result<()> {
     let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(test_now()));
     let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new()));
     let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-    let commitment_registry = Arc::new(tokio::sync::Mutex::new(CommitmentRegistryVariant::Mock(
-        MockCommitmentRegistry::new(),
+    let downstream = Arc::new(tokio::sync::Mutex::new(DownstreamVariant::Mock(
+        MockDownstream::new(),
     )));
     let (commit_tx, _commit_rx) =
         unbounded_async::<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>();
@@ -144,7 +142,7 @@ async fn test_process_commit_cycle_not_ready() -> Result<()> {
         &active_namespaces,
         &storage,
         &committed_records,
-        &commitment_registry,
+        &downstream,
         &commit_tx,
         batch_interval_secs,
         AccumulatorType::Merkle,
@@ -167,8 +165,8 @@ async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
     let epoch_start_ts = Arc::new(tokio::sync::Mutex::new(epoch_start));
     let active_namespaces = Arc::new(tokio::sync::Mutex::new(HashMap::new())); // Empty
     let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-    let commitment_registry = Arc::new(tokio::sync::Mutex::new(CommitmentRegistryVariant::Mock(
-        MockCommitmentRegistry::new(),
+    let downstream = Arc::new(tokio::sync::Mutex::new(DownstreamVariant::Mock(
+        MockDownstream::new(),
     )));
     let (commit_tx, _commit_rx) =
         unbounded_async::<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>();
@@ -181,7 +179,7 @@ async fn test_process_commit_cycle_no_active_namespaces() -> Result<()> {
         &active_namespaces,
         &storage,
         &committed_records,
-        &commitment_registry,
+        &downstream,
         &commit_tx,
         batch_interval_secs,
         AccumulatorType::Merkle,
@@ -240,10 +238,10 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
     let active_namespaces = Arc::new(tokio::sync::Mutex::new(active_namespaces_map));
 
     let committed_records = Arc::new(tokio::sync::Mutex::new(Vec::new()));
-    let mock_registry = MockCommitmentRegistry::new();
-    let registry_clone = mock_registry.clone();
-    let commitment_registry = Arc::new(tokio::sync::Mutex::new(CommitmentRegistryVariant::Mock(
-        mock_registry,
+    let mock_downstream = MockDownstream::new();
+    let downstream_calls = Arc::clone(&mock_downstream.calls);
+    let downstream = Arc::new(tokio::sync::Mutex::new(DownstreamVariant::Mock(
+        mock_downstream,
     )));
     let (commit_tx, commit_rx) =
         unbounded_async::<(Namespace, Vec<u8>, u64, Vec<(Key32, Value32)>)>();
@@ -256,7 +254,7 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
         &active_namespaces,
         &storage_arc,
         &committed_records,
-        &commitment_registry,
+        &downstream,
         &commit_tx,
         batch_interval_secs,
         AccumulatorType::Merkle,
@@ -275,11 +273,11 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
         }
         Ok(None) => {
             // Channel is empty - the send might have failed silently in commit_namespace
-            // Let's just verify the commitment was saved to registry instead
+            // Let's just verify the commitment was saved to downstream instead
             eprintln!("Warning: No message in channel, but commitment may have succeeded anyway");
         }
         Err(e) => {
-            // Channel error - but commit to registry should still have succeeded
+            // Channel error - but commit to downstream should still have succeeded
             eprintln!(
                 "Warning: Channel error {:?}, but commitment may have succeeded anyway",
                 e
@@ -287,13 +285,11 @@ async fn test_process_commit_cycle_with_namespace() -> Result<()> {
         }
     }
 
-    // Verify commitment was made
-    let commitments = registry_clone.get_commitments();
-    assert_eq!(commitments.len(), 1, "Should have 1 commitment");
-    assert_eq!(
-        commitments[0].commitment.namespace, namespace,
-        "Commitment namespace should match"
-    );
+    // Verify commitment was sent to downstream
+    let calls = downstream_calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "Should have 1 downstream call");
+    assert!(!calls[0].commitment.is_empty(), "Commitment should not be empty");
+    assert!(calls[0].proofs.is_none(), "Proofs should be None in commit phase");
 
     // Verify epoch was reset
     let new_epoch_start = *epoch_start_ts.lock().await;
@@ -323,10 +319,10 @@ async fn test_process_proof_generation_success() -> Result<()> {
         (test_key(3), test_value(3)),
     ];
 
-    let mock_proof_registry = MockProofRegistry::new();
-    let registry_clone = mock_proof_registry.clone();
-    let proof_registry = Arc::new(tokio::sync::Mutex::new(ProofRegistryVariant::Mock(
-        mock_proof_registry,
+    let mock_downstream = MockDownstream::new();
+    let downstream_calls = Arc::clone(&mock_downstream.calls);
+    let downstream = Arc::new(tokio::sync::Mutex::new(DownstreamVariant::Mock(
+        mock_downstream,
     )));
 
     let (proof_delivery_tx, proof_delivery_rx) = unbounded_async::<Vec<StoredProof>>();
@@ -337,7 +333,7 @@ async fn test_process_proof_generation_success() -> Result<()> {
         root.clone(),
         committed_at,
         records.clone(),
-        &proof_registry,
+        &downstream,
         &proof_delivery_tx,
         AccumulatorType::Merkle,
     )
@@ -351,9 +347,12 @@ async fn test_process_proof_generation_success() -> Result<()> {
 
     assert_eq!(proofs.len(), 3, "Should receive 3 proofs");
 
-    // Verify proofs were saved to registry
-    let saved_proofs = registry_clone.get_proofs();
-    assert_eq!(saved_proofs.len(), 3, "Should have 3 saved proofs");
+    // Verify proofs were sent to downstream
+    let calls = downstream_calls.lock().unwrap();
+    assert_eq!(calls.len(), 1, "Should have 1 downstream call");
+    assert!(!calls[0].commitment.is_empty(), "Commitment should not be empty");
+    assert!(calls[0].proofs.is_some(), "Proofs should be Some");
+    assert_eq!(calls[0].proofs.as_ref().unwrap().len(), 3, "Should have 3 proofs in map");
 
     Ok(())
 }
@@ -365,8 +364,8 @@ async fn test_process_proof_generation_empty_records() -> Result<()> {
     let committed_at = test_now();
     let records: Vec<(Key32, Value32)> = Vec::new();
 
-    let proof_registry = Arc::new(tokio::sync::Mutex::new(ProofRegistryVariant::Mock(
-        MockProofRegistry::new(),
+    let downstream = Arc::new(tokio::sync::Mutex::new(DownstreamVariant::Mock(
+        MockDownstream::new(),
     )));
     let (proof_delivery_tx, _proof_delivery_rx) = unbounded_async::<Vec<StoredProof>>();
 
@@ -376,7 +375,7 @@ async fn test_process_proof_generation_empty_records() -> Result<()> {
         root,
         committed_at,
         records,
-        &proof_registry,
+        &downstream,
         &proof_delivery_tx,
         AccumulatorType::Merkle,
     )

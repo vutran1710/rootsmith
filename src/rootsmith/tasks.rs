@@ -16,26 +16,18 @@ use tracing::info;
 use tracing::span;
 use tracing::Level;
 
-use super::core::CommittedRecord;
 use super::core::RootSmith;
 use crate::archive::ArchiveStorageVariant;
-use crate::commitment_registry::CommitmentRegistryVariant;
-use crate::config::AccumulatorType;
-use crate::proof_delivery::ProofDeliveryVariant;
-use crate::proof_registry::ProofRegistryVariant;
 use crate::storage::Storage;
 use crate::types::IncomingRecord;
 use crate::types::Key32;
 use crate::types::Namespace;
 use crate::types::StoredProof;
-use crate::types::Value32;
-use crate::upstream::UpstreamVariant;
 
 // ==================== TYPE ALIASES ====================
 
 type NamespaceMap = Arc<tokio::sync::Mutex<HashMap<Namespace, bool>>>;
 type StorageArc = Arc<tokio::sync::Mutex<Storage>>;
-type CommitmentRegistry = Arc<tokio::sync::Mutex<CommitmentRegistryVariant>>;
 type ArchiveStorage = Arc<tokio::sync::Mutex<ArchiveStorageVariant>>;
 
 // ==================== GENERIC TASK UTILITIES ====================
@@ -131,7 +123,6 @@ async fn process_archiving_cycle(
     archive_storage: &ArchiveStorage,
     storage: &StorageArc,
     active_namespaces: &NamespaceMap,
-    commitment_registry: &CommitmentRegistry,
     archive_threshold_secs: u64,
 ) -> Result<()> {
     let now = RootSmith::now_secs();
@@ -163,14 +154,8 @@ async fn process_archiving_cycle(
     let archived_count =
         archive_old_records(archive_storage, storage, &namespaces, archive_cutoff).await?;
 
-    // Archive old commitments
-    let archived_commitments = archive_old_commitments(
-        archive_storage,
-        commitment_registry,
-        &namespaces,
-        archive_cutoff,
-    )
-    .await?;
+    // Note: Commitment archiving disabled as commitment_registry was replaced with downstream
+    let archived_commitments = 0;
 
     // Summary logging
     let total = archived_count + archived_commitments;
@@ -230,7 +215,7 @@ async fn archive_old_records(
                     .map(|r| ArchiveData::Record(r.clone()))
                     .collect();
 
-                let mut archive = archive_storage.lock().await;
+                let archive = archive_storage.lock().await;
                 match (*archive).archive_batch(&archive_data).await {
                     Ok(ids) => {
                         archived_count += ids.len();
@@ -251,6 +236,9 @@ async fn archive_old_records(
     Ok(archived_count)
 }
 
+// Note: archive_old_commitments function disabled as commitment_registry was replaced with downstream
+// The archiving of commitments would need to be reimplemented using a different mechanism if needed.
+/*
 /// Archive old commitments for namespaces.
 async fn archive_old_commitments(
     archive_storage: &ArchiveStorage,
@@ -303,6 +291,7 @@ async fn archive_old_commitments(
 
     Ok(archived_commitments)
 }
+*/
 
 impl RootSmith {
     /// Run the application: spawn all tasks and orchestrate the system.
@@ -324,9 +313,8 @@ impl RootSmith {
 
         // Destructure self so we can move individual fields into tasks.
         let RootSmith {
-            mut upstream,
-            commitment_registry,
-            proof_registry,
+            upstream,
+            downstream,
             proof_delivery,
             archive_storage,
             config,
@@ -337,8 +325,7 @@ impl RootSmith {
         } = self;
 
         // Wrap shared components in Arc<Mutex> for sharing across tasks
-        let commitment_registry = Arc::new(tokio::sync::Mutex::new(commitment_registry));
-        let proof_registry = Arc::new(tokio::sync::Mutex::new(proof_registry));
+        let downstream = Arc::new(tokio::sync::Mutex::new(downstream));
         let proof_delivery = Arc::new(tokio::sync::Mutex::new(proof_delivery));
         let archive_storage = Arc::new(tokio::sync::Mutex::new(archive_storage));
 
@@ -365,13 +352,13 @@ impl RootSmith {
             })
         };
 
-        // === Commit task: periodically commit batches to commitment registry ===
+        // === Commit task: periodically commit batches to downstream ===
         let commit_handle = {
             let storage = Arc::clone(&storage);
             let active_namespaces = Arc::clone(&active_namespaces);
             let epoch_start_ts = Arc::clone(&epoch_start_ts);
             let committed_records = Arc::clone(&committed_records);
-            let commitment_registry = Arc::clone(&commitment_registry);
+            let downstream = Arc::clone(&downstream);
             let commit_tx = commit_tx.clone();
             let config_clone = config.clone();
 
@@ -380,7 +367,7 @@ impl RootSmith {
                 let active_namespaces = Arc::clone(&active_namespaces);
                 let epoch_start_ts = Arc::clone(&epoch_start_ts);
                 let committed_records = Arc::clone(&committed_records);
-                let commitment_registry = Arc::clone(&commitment_registry);
+                let downstream = Arc::clone(&downstream);
                 let commit_tx = commit_tx.clone();
                 let config_clone = config_clone.clone();
 
@@ -390,7 +377,7 @@ impl RootSmith {
                         &active_namespaces,
                         &storage,
                         &committed_records,
-                        &commitment_registry,
+                        &downstream,
                         &commit_tx,
                         config_clone.batch_interval_secs,
                         config_clone.accumulator_type,
@@ -401,9 +388,9 @@ impl RootSmith {
             })
         };
 
-        // === Proof registry task: generate and persist proofs for committed batches ===
+        // === Proof generation task: generate proofs for committed batches ===
         let proof_registry_handle = {
-            let proof_registry = Arc::clone(&proof_registry);
+            let downstream = Arc::clone(&downstream);
             let config_clone = config.clone();
             let proof_delivery_tx = proof_delivery_tx.clone();
 
@@ -411,7 +398,7 @@ impl RootSmith {
                 "proof_registry",
                 commit_rx,
                 move |(namespace, root, committed_at, records)| {
-                    let proof_registry = Arc::clone(&proof_registry);
+                    let downstream = Arc::clone(&downstream);
                     let proof_delivery_tx = proof_delivery_tx.clone();
                     let config_clone = config_clone.clone();
 
@@ -421,7 +408,7 @@ impl RootSmith {
                             root,
                             committed_at,
                             records,
-                            &proof_registry,
+                            &downstream,
                             &proof_delivery_tx,
                             config_clone.accumulator_type,
                         )
@@ -481,12 +468,11 @@ impl RootSmith {
             })
         };
 
-        // === Archiving task: archive old commitments and proofs to cold storage ===
+        // === Archiving task: archive old records to cold storage ===
         let archiving_handle = {
             let archive_storage = Arc::clone(&archive_storage);
             let storage = Arc::clone(&storage);
             let active_namespaces = Arc::clone(&active_namespaces);
-            let commitment_registry = Arc::clone(&commitment_registry);
 
             // Archive retention threshold: data older than this will be archived
             let archive_threshold_secs = 30 * 24 * 3600; // 30 days
@@ -495,14 +481,12 @@ impl RootSmith {
                 let archive_storage = Arc::clone(&archive_storage);
                 let storage = Arc::clone(&storage);
                 let active_namespaces = Arc::clone(&active_namespaces);
-                let commitment_registry = Arc::clone(&commitment_registry);
 
                 async move {
                     process_archiving_cycle(
                         &archive_storage,
                         &storage,
                         &active_namespaces,
-                        &commitment_registry,
                         archive_threshold_secs,
                     )
                     .await
