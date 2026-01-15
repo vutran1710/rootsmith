@@ -307,11 +307,9 @@ impl RootSmith {
                         }
                     };
 
-                    proof_map.insert(*key, proof_bytes.clone());
-
                     let stored_proof = StoredProof {
                         root: root.clone(),
-                        proof: proof_bytes,
+                        proof: proof_bytes.clone(),
                         key: *key,
                         meta: serde_json::json!({
                             "namespace": hex::encode(namespace),
@@ -319,6 +317,7 @@ impl RootSmith {
                         }),
                     };
                     stored_proofs.push(stored_proof);
+                    proof_map.insert(*key, proof_bytes);
                 }
                 Ok(None) => {
                     debug!("No proof available for key {:?}", key);

@@ -155,14 +155,12 @@ async fn process_archiving_cycle(
         archive_old_records(archive_storage, storage, &namespaces, archive_cutoff).await?;
 
     // Note: Commitment archiving disabled as commitment_registry was replaced with downstream
-    let archived_commitments = 0;
 
     // Summary logging
-    let total = archived_count + archived_commitments;
-    if total > 0 {
+    if archived_count > 0 {
         info!(
-            "Archiving cycle: {} records, {} commitments",
-            archived_count, archived_commitments
+            "Archiving cycle: {} records archived",
+            archived_count
         );
     } else {
         debug!("No old data to archive");
