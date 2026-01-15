@@ -4,6 +4,7 @@ use anyhow::Result;
 use rocksdb::Direction;
 use rocksdb::IteratorMode;
 use rocksdb::Options;
+use rocksdb::WriteBatch;
 use rocksdb::DB;
 
 use crate::types::IncomingRecord;
@@ -76,6 +77,17 @@ impl Storage {
     pub fn put(&self, record: &IncomingRecord) -> Result<()> {
         let k = Self::encode_key(&record.namespace, record.timestamp, &record.key);
         self.db.put(k, &record.value)?;
+        Ok(())
+    }
+
+    /// Put multiple records into storage efficiently using a write batch.
+    pub fn put_many(&self, records: &[IncomingRecord]) -> Result<()> {
+        let mut batch = WriteBatch::default();
+        for record in records {
+            let k = Self::encode_key(&record.namespace, record.timestamp, &record.key);
+            batch.put(k, record.value);
+        }
+        self.db.write(batch)?;
         Ok(())
     }
 
