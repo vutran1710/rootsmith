@@ -8,10 +8,9 @@ use std::time::UNIX_EPOCH;
 use anyhow::Result;
 use tracing::info;
 
-use crate::archive::ArchiveStorageVariant;
+use crate::archiver::ArchiveStorageVariant;
 use crate::config::BaseConfig;
 use crate::downstream::DownstreamVariant;
-use crate::proof_delivery::ProofDeliveryVariant;
 use crate::storage::Storage;
 use crate::types::Namespace;
 use crate::types::Value32;
@@ -43,9 +42,6 @@ pub struct RootSmith {
     /// Downstream handler for commitment results.
     pub downstream: DownstreamVariant,
 
-    /// Proof delivery implementation.
-    pub proof_delivery: ProofDeliveryVariant,
-
     /// Archive storage implementation.
     pub archive_storage: ArchiveStorageVariant,
 
@@ -70,7 +66,6 @@ impl RootSmith {
     pub fn new(
         upstream: UpstreamVariant,
         downstream: DownstreamVariant,
-        proof_delivery: ProofDeliveryVariant,
         archive_storage: ArchiveStorageVariant,
         config: BaseConfig,
         storage: Storage,
@@ -83,7 +78,6 @@ impl RootSmith {
         Self {
             upstream,
             downstream,
-            proof_delivery,
             archive_storage,
             config,
             storage: Arc::new(tokio::sync::Mutex::new(storage)),
@@ -95,12 +89,10 @@ impl RootSmith {
 
     /// Initialize RootSmith with default Noop implementations.
     pub async fn initialize(config: BaseConfig) -> Result<Self> {
-        use crate::archive::ArchiveStorageVariant;
-        use crate::archive::NoopArchive;
+        use crate::archiver::ArchiveStorageVariant;
+        use crate::archiver::NoopArchive;
         use crate::downstream::BlackholeDownstream;
         use crate::downstream::DownstreamVariant;
-        use crate::proof_delivery::NoopDelivery;
-        use crate::proof_delivery::ProofDeliveryVariant;
         use crate::upstream::NoopUpstream;
 
         let storage = Storage::open(&config.storage_path)?;
@@ -108,13 +100,11 @@ impl RootSmith {
 
         let upstream = UpstreamVariant::Noop(NoopUpstream);
         let downstream = DownstreamVariant::Blackhole(BlackholeDownstream::new());
-        let proof_delivery = ProofDeliveryVariant::Noop(NoopDelivery);
         let archive_storage = ArchiveStorageVariant::Noop(NoopArchive);
 
         Ok(Self::new(
             upstream,
             downstream,
-            proof_delivery,
             archive_storage,
             config,
             storage,

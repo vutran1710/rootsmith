@@ -2,12 +2,10 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::info;
 
-mod archive;
+mod accumulator;
+mod archiver;
 mod config;
-mod crypto;
 mod downstream;
-mod feature_select;
-mod proof_delivery;
 mod rootsmith;
 mod storage;
 mod telemetry;
