@@ -14,9 +14,9 @@ fn test_value(id: u8) -> Vec<u8> {
     vec![id; 32]
 }
 
-#[test]
-fn test_merkle_accumulator_commit_batch() -> Result<()> {
-    println!("\n=== Test: Merkle Accumulator Batch Commit ===\n");
+#[tokio::test]
+async fn test_merkle_accumulator_commit() -> Result<()> {
+    println!("\n=== Test: Merkle Accumulator Commit ===\n");
 
     let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle);
 
@@ -28,8 +28,17 @@ fn test_merkle_accumulator_commit_batch() -> Result<()> {
         })
         .collect();
 
+    // Create channel for receiving results
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
     // Commit batch
-    let (root, proofs) = accumulator.commit_batch(&records)?;
+    accumulator.commit(&records, tx).await?;
+
+    // Receive the result
+    let result = rx.recv().await;
+    assert!(result.is_some(), "Should receive a result");
+
+    let (root, proofs) = result.unwrap();
 
     println!("Root hash: {:?}", hex::encode(&root));
     println!("Number of proofs generated: {}", proofs.as_ref().map(|p| p.len()).unwrap_or(0));
@@ -51,14 +60,14 @@ fn test_merkle_accumulator_commit_batch() -> Result<()> {
         assert!(!proof.unwrap().nodes.is_empty(), "Proof should have nodes");
     }
 
-    println!("✓ Batch commit with proofs completed successfully\n");
+    println!("✓ Commit with proofs completed successfully\n");
 
     Ok(())
 }
 
-#[test]
-fn test_sparse_merkle_accumulator_commit_batch() -> Result<()> {
-    println!("\n=== Test: Sparse Merkle Accumulator Batch Commit ===\n");
+#[tokio::test]
+async fn test_sparse_merkle_accumulator_commit() -> Result<()> {
+    println!("\n=== Test: Sparse Merkle Accumulator Commit ===\n");
 
     let mut accumulator = AccumulatorVariant::new(AccumulatorType::SparseMerkle);
 
@@ -70,8 +79,17 @@ fn test_sparse_merkle_accumulator_commit_batch() -> Result<()> {
         })
         .collect();
 
+    // Create channel for receiving results
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
     // Commit batch
-    let (root, proofs) = accumulator.commit_batch(&records)?;
+    accumulator.commit(&records, tx).await?;
+
+    // Receive the result
+    let result = rx.recv().await;
+    assert!(result.is_some(), "Should receive a result");
+
+    let (root, proofs) = result.unwrap();
 
     println!("Root hash: {:?}", hex::encode(&root));
     println!("Number of proofs generated: {}", proofs.as_ref().map(|p| p.len()).unwrap_or(0));
@@ -93,55 +111,13 @@ fn test_sparse_merkle_accumulator_commit_batch() -> Result<()> {
         assert!(!proof.unwrap().nodes.is_empty(), "Proof should have nodes");
     }
 
-    println!("✓ Batch commit with proofs completed successfully\n");
+    println!("✓ Commit with proofs completed successfully\n");
 
     Ok(())
 }
 
 #[tokio::test]
-async fn test_merkle_accumulator_commit_batch_async() -> Result<()> {
-    println!("\n=== Test: Merkle Accumulator Async Batch Commit ===\n");
-
-    let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle);
-
-    // Create test records
-    let records: Vec<RawRecord> = (0..3)
-        .map(|i| RawRecord {
-            key: test_key(i),
-            value: test_value(i),
-        })
-        .collect();
-
-    // Create channel for receiving results
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
-    // Commit batch asynchronously
-    accumulator.commit_batch_async(&records, tx).await?;
-
-    // Receive the result
-    let result = rx.recv().await;
-    assert!(result.is_some(), "Should receive a result");
-
-    let (root, proofs) = result.unwrap();
-
-    println!("Root hash: {:?}", hex::encode(&root));
-
-    // Verify root is not empty
-    assert!(!root.is_empty(), "Root should not be empty");
-    assert_eq!(root.len(), 32, "Root should be 32 bytes");
-
-    // Verify proofs were generated
-    assert!(proofs.is_some(), "Proofs should be generated");
-    let proofs = proofs.unwrap();
-    assert_eq!(proofs.len(), 3, "Should have 3 proofs");
-
-    println!("✓ Async commit completed successfully\n");
-
-    Ok(())
-}
-
-#[test]
-fn test_empty_batch() -> Result<()> {
+async fn test_empty_batch() -> Result<()> {
     println!("\n=== Test: Empty Batch Commit ===\n");
 
     let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle);
@@ -149,8 +125,17 @@ fn test_empty_batch() -> Result<()> {
     // Empty records
     let records: Vec<RawRecord> = vec![];
 
+    // Create channel for receiving results
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+
     // Commit empty batch
-    let (root, proofs) = accumulator.commit_batch(&records)?;
+    accumulator.commit(&records, tx).await?;
+
+    // Receive the result
+    let result = rx.recv().await;
+    assert!(result.is_some(), "Should receive a result");
+
+    let (root, proofs) = result.unwrap();
 
     println!("Root hash for empty batch: {:?}", hex::encode(&root));
 
@@ -167,8 +152,8 @@ fn test_empty_batch() -> Result<()> {
     Ok(())
 }
 
-#[test]
-fn test_multiple_batches() -> Result<()> {
+#[tokio::test]
+async fn test_multiple_batches() -> Result<()> {
     println!("\n=== Test: Multiple Sequential Batches ===\n");
 
     let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle);
@@ -181,7 +166,9 @@ fn test_multiple_batches() -> Result<()> {
         })
         .collect();
 
-    let (root1, _proofs1) = accumulator.commit_batch(&records1)?;
+    let (tx1, mut rx1) = tokio::sync::mpsc::unbounded_channel();
+    accumulator.commit(&records1, tx1).await?;
+    let (root1, _proofs1) = rx1.recv().await.unwrap();
     println!("Batch 1 root: {:?}", hex::encode(&root1));
 
     // Second batch (should flush first batch)
@@ -192,7 +179,9 @@ fn test_multiple_batches() -> Result<()> {
         })
         .collect();
 
-    let (root2, proofs2) = accumulator.commit_batch(&records2)?;
+    let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
+    accumulator.commit(&records2, tx2).await?;
+    let (root2, proofs2) = rx2.recv().await.unwrap();
     println!("Batch 2 root: {:?}", hex::encode(&root2));
 
     // Roots should be different (different data)

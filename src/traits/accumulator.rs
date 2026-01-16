@@ -7,52 +7,32 @@ use crate::types::Proof;
 use crate::types::RawRecord;
 use crate::types::Value32;
 
-/// Stateful cryptographic accumulator with support for both sync and async operations.
+/// Stateful cryptographic accumulator with async batch processing.
 ///
-/// The accumulator is a blackbox module that can handle batch processing of records.
-/// It produces commitment results that may be delivered synchronously or asynchronously
-/// via channels (e.g., when sending to external services that take hours to respond).
+/// The accumulator is a blackbox module that handles batch processing of records.
+/// It produces commitment results that are delivered asynchronously via channels,
+/// supporting scenarios where commitment may take hours (e.g., external services).
 #[async_trait]
 pub trait Accumulator: Send + Sync {
     /// Identifier for logging/telemetry (e.g. "merkle", "sparse-merkle").
     fn id(&self) -> &'static str;
 
-    /// Process a batch of records and produce a commitment result synchronously.
-    ///
-    /// This is the primary method for batch commitment. It takes an array of records
-    /// and returns the commitment result immediately (blocking/synchronous).
-    ///
-    /// # Arguments
-    /// * `records` - Array of raw records to accumulate
-    ///
-    /// # Returns
-    /// * Root hash and optional structured proofs
-    fn commit_batch(&mut self, records: &[RawRecord]) -> Result<(Vec<u8>, Option<HashMap<Key32, Proof>>)>;
-
     /// Process a batch of records and send the commitment result asynchronously via a channel.
     ///
-    /// This method is for accumulators that need to interact with external services
-    /// (e.g., blockchain, external prover) where the result may not be available immediately.
-    /// The result will be sent through the provided channel when ready.
+    /// This is the primary method for batch commitment. It processes records and sends
+    /// the result (root hash and proofs) through the provided channel when ready.
     ///
     /// # Arguments
     /// * `records` - Array of raw records to accumulate
-    /// * `result_tx` - Channel sender for delivering the commitment result asynchronously
+    /// * `result_tx` - Channel sender for delivering the commitment result
     ///
     /// # Returns
-    /// * `Ok(())` if the async operation was started successfully
-    async fn commit_batch_async(
+    /// * `Ok(())` if the operation completed successfully
+    async fn commit(
         &mut self,
         records: &[RawRecord],
         result_tx: tokio::sync::mpsc::UnboundedSender<(Vec<u8>, Option<HashMap<Key32, Proof>>)>,
-    ) -> Result<()> {
-        // Default implementation: compute synchronously and send via channel
-        let result = self.commit_batch(records)?;
-        result_tx
-            .send(result)
-            .map_err(|_| anyhow::anyhow!("Failed to send commitment result"))?;
-        Ok(())
-    }
+    ) -> Result<()>;
 
     /// Verify a proof for a specific key-value pair against a known root.
     ///
@@ -74,7 +54,6 @@ pub trait Accumulator: Send + Sync {
 
     // ===== Legacy Methods (for backward compatibility) =====
     // These methods are kept for existing code that uses the old interface.
-    // New code should use commit_batch/commit_batch_async instead.
 
     /// Legacy: Insert a single key-value pair (backward compatibility).
     fn put(&mut self, key: Key32, value: Value32) -> Result<()>;

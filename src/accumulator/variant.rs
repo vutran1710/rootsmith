@@ -38,25 +38,14 @@ impl Accumulator for AccumulatorVariant {
         }
     }
 
-    fn commit_batch(&mut self, records: &[RawRecord]) -> Result<(Vec<u8>, Option<HashMap<Key32, Proof>>)> {
-        match self {
-            AccumulatorVariant::Merkle(inner) => inner.commit_batch(records),
-            AccumulatorVariant::SparseMerkle(inner) => inner.commit_batch(records),
-        }
-    }
-
-    async fn commit_batch_async(
+    async fn commit(
         &mut self,
         records: &[RawRecord],
         result_tx: tokio::sync::mpsc::UnboundedSender<(Vec<u8>, Option<HashMap<Key32, Proof>>)>,
     ) -> Result<()> {
         match self {
-            AccumulatorVariant::Merkle(inner) => {
-                inner.commit_batch_async(records, result_tx).await
-            }
-            AccumulatorVariant::SparseMerkle(inner) => {
-                inner.commit_batch_async(records, result_tx).await
-            }
+            AccumulatorVariant::Merkle(inner) => inner.commit(records, result_tx).await,
+            AccumulatorVariant::SparseMerkle(inner) => inner.commit(records, result_tx).await,
         }
     }
 

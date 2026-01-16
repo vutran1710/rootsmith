@@ -63,7 +63,11 @@ impl Accumulator for SparseMerkleAccumulator {
         "sparse-merkle"
     }
 
-    fn commit_batch(&mut self, records: &[RawRecord]) -> Result<(Vec<u8>, Option<std::collections::HashMap<Key32, Proof>>)> {
+    async fn commit(
+        &mut self,
+        records: &[RawRecord],
+        result_tx: tokio::sync::mpsc::UnboundedSender<(Vec<u8>, Option<std::collections::HashMap<Key32, Proof>>)>,
+    ) -> Result<()> {
         // Clear any existing state
         self.flush()?;
 
@@ -96,7 +100,12 @@ impl Accumulator for SparseMerkleAccumulator {
             }
         }
 
-        Ok((root, Some(proofs)))
+        // Send result via channel
+        result_tx
+            .send((root, Some(proofs)))
+            .map_err(|_| anyhow::anyhow!("Failed to send commitment result"))?;
+
+        Ok(())
     }
 
     fn verify_proof(
