@@ -29,10 +29,12 @@ async fn main() -> Result<()> {
         config.storage_path, config.batch_interval_secs
     );
 
-    // Initialize and run the app
-    let app = RootSmith::initialize(config).await?;
-    app.run().await?;
+    // Initialize the app
+    let _app = RootSmith::initialize(config).await?;
+    
+    // TODO: Implement the run loop
+    info!("RootSmith initialized successfully");
+    info!("Note: Run loop not yet implemented");
 
-    info!("Rootsmith shutdown complete");
     Ok(())
 }
