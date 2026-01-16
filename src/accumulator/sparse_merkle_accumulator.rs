@@ -177,9 +177,10 @@ impl Accumulator for SparseMerkleAccumulator {
 
         Ok(ok)
     }
+}
 
-    // ===== Legacy Methods =====
-
+// ===== Private Helper Methods =====
+impl SparseMerkleAccumulator {
     fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
         let key_hash = Hash::from(key);
         let leaf = Self::leaf_hash(&key, &value);
@@ -231,42 +232,12 @@ impl Accumulator for SparseMerkleAccumulator {
         Ok(Some(Proof { nodes }))
     }
 
-    fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {
-        if value.len() != 32 {
-            return Ok(false);
+    fn prove_many(&self, keys: &[Key32]) -> Result<Vec<(Key32, Option<Proof>)>> {
+        let mut out = Vec::with_capacity(keys.len());
+        for k in keys {
+            out.push((*k, self.prove(k)?));
         }
-
-        let key_hash = Hash::from(*key);
-
-        let mut tree = self.tree.lock().unwrap();
-        let root = self.root.lock().unwrap();
-
-        let stored_leaf = tree
-            .get(root.as_ref(), &key_hash)
-            .map_err(|e| anyhow::anyhow!("Failed to get from tree: {:?}", e))?;
-
-        let Some(stored_leaf) = stored_leaf else {
-            return Ok(false);
-        };
-
-        let mut v = [0u8; 32];
-        v.copy_from_slice(value);
-
-        let expected_leaf = Self::leaf_hash(key, &v);
-        Ok(stored_leaf == expected_leaf)
-    }
-
-    fn verify_non_inclusion(&self, key: &Key32) -> Result<bool> {
-        let key_hash = Hash::from(*key);
-
-        let mut tree = self.tree.lock().unwrap();
-        let root = self.root.lock().unwrap();
-
-        let stored_value = tree
-            .get(root.as_ref(), &key_hash)
-            .map_err(|e| anyhow::anyhow!("Failed to get from tree: {:?}", e))?;
-
-        Ok(stored_value.is_none())
+        Ok(out)
     }
 
     fn flush(&mut self) -> Result<()> {
