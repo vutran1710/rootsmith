@@ -106,7 +106,8 @@ impl Accumulator for SparseMerkleAccumulator {
                     let monotree_proof = match tree.get_merkle_proof(tree_root.as_ref(), &key_hash)
                     {
                         Ok(Some(p)) => p,
-                        _ => continue,
+                        Ok(None) => continue, // Key not found in tree
+                        Err(_) => continue,   // Error during proof generation
                     };
 
                     let nodes: Vec<ProofNode> = monotree_proof
