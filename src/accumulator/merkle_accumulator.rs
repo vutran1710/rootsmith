@@ -1,4 +1,6 @@
 use std::collections::HashMap;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -7,6 +9,7 @@ use rs_merkle::Hasher;
 use rs_merkle::MerkleTree as RsMerkleTree;
 
 use crate::traits::Accumulator;
+use crate::types::CommitmentResult;
 use crate::types::Key32;
 use crate::types::Proof;
 use crate::types::ProofNode;
@@ -51,7 +54,7 @@ impl Accumulator for MerkleAccumulator {
     async fn commit(
         &mut self,
         records: &[RawRecord],
-        result_tx: tokio::sync::mpsc::UnboundedSender<(Vec<u8>, Option<HashMap<Key32, Proof>>)>,
+        result_tx: tokio::sync::mpsc::UnboundedSender<CommitmentResult>,
     ) -> Result<()> {
         // Clear any existing state
         self.flush()?;
@@ -78,9 +81,21 @@ impl Accumulator for MerkleAccumulator {
             }
         }
 
-        // Send result via channel
+        // Get current timestamp
+        let committed_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before UNIX_EPOCH")
+            .as_secs();
+
+        // Create and send result via channel
+        let result = CommitmentResult {
+            commitment: root,
+            proofs: Some(proofs),
+            committed_at,
+        };
+
         result_tx
-            .send((root, Some(proofs)))
+            .send(result)
             .map_err(|_| anyhow::anyhow!("Failed to send commitment result"))?;
 
         Ok(())

@@ -38,18 +38,19 @@ async fn test_merkle_accumulator_commit() -> Result<()> {
     let result = rx.recv().await;
     assert!(result.is_some(), "Should receive a result");
 
-    let (root, proofs) = result.unwrap();
+    let result = result.unwrap();
 
-    println!("Root hash: {:?}", hex::encode(&root));
-    println!("Number of proofs generated: {}", proofs.as_ref().map(|p| p.len()).unwrap_or(0));
+    println!("Root hash: {:?}", hex::encode(&result.commitment));
+    println!("Commitment timestamp: {}", result.committed_at);
+    println!("Number of proofs generated: {}", result.proofs.as_ref().map(|p| p.len()).unwrap_or(0));
 
     // Verify root is not empty
-    assert!(!root.is_empty(), "Root should not be empty");
-    assert_eq!(root.len(), 32, "Root should be 32 bytes");
+    assert!(!result.commitment.is_empty(), "Root should not be empty");
+    assert_eq!(result.commitment.len(), 32, "Root should be 32 bytes");
 
     // Verify proofs were generated
-    assert!(proofs.is_some(), "Proofs should be generated");
-    let proofs = proofs.unwrap();
+    assert!(result.proofs.is_some(), "Proofs should be generated");
+    let proofs = result.proofs.unwrap();
     assert_eq!(proofs.len(), 5, "Should have 5 proofs");
 
     // Verify each proof exists
@@ -89,18 +90,19 @@ async fn test_sparse_merkle_accumulator_commit() -> Result<()> {
     let result = rx.recv().await;
     assert!(result.is_some(), "Should receive a result");
 
-    let (root, proofs) = result.unwrap();
+    let result = result.unwrap();
 
-    println!("Root hash: {:?}", hex::encode(&root));
-    println!("Number of proofs generated: {}", proofs.as_ref().map(|p| p.len()).unwrap_or(0));
+    println!("Root hash: {:?}", hex::encode(&result.commitment));
+    println!("Commitment timestamp: {}", result.committed_at);
+    println!("Number of proofs generated: {}", result.proofs.as_ref().map(|p| p.len()).unwrap_or(0));
 
     // Verify root is not empty
-    assert!(!root.is_empty(), "Root should not be empty");
-    assert_eq!(root.len(), 32, "Root should be 32 bytes");
+    assert!(!result.commitment.is_empty(), "Root should not be empty");
+    assert_eq!(result.commitment.len(), 32, "Root should be 32 bytes");
 
     // Verify proofs were generated
-    assert!(proofs.is_some(), "Proofs should be generated");
-    let proofs = proofs.unwrap();
+    assert!(result.proofs.is_some(), "Proofs should be generated");
+    let proofs = result.proofs.unwrap();
     assert_eq!(proofs.len(), 5, "Should have 5 proofs");
 
     // Verify each proof exists
@@ -135,16 +137,16 @@ async fn test_empty_batch() -> Result<()> {
     let result = rx.recv().await;
     assert!(result.is_some(), "Should receive a result");
 
-    let (root, proofs) = result.unwrap();
+    let result = result.unwrap();
 
-    println!("Root hash for empty batch: {:?}", hex::encode(&root));
+    println!("Root hash for empty batch: {:?}", hex::encode(&result.commitment));
 
     // Verify root exists (should be default/empty root)
-    assert!(!root.is_empty(), "Root should not be empty");
+    assert!(!result.commitment.is_empty(), "Root should not be empty");
 
     // Verify no proofs were generated
-    assert!(proofs.is_some(), "Proofs map should exist");
-    let proofs = proofs.unwrap();
+    assert!(result.proofs.is_some(), "Proofs map should exist");
+    let proofs = result.proofs.unwrap();
     assert_eq!(proofs.len(), 0, "Should have no proofs");
 
     println!("✓ Empty batch handled correctly\n");
@@ -168,8 +170,8 @@ async fn test_multiple_batches() -> Result<()> {
 
     let (tx1, mut rx1) = tokio::sync::mpsc::unbounded_channel();
     accumulator.commit(&records1, tx1).await?;
-    let (root1, _proofs1) = rx1.recv().await.unwrap();
-    println!("Batch 1 root: {:?}", hex::encode(&root1));
+    let result1 = rx1.recv().await.unwrap();
+    println!("Batch 1 root: {:?}", hex::encode(&result1.commitment));
 
     // Second batch (should flush first batch)
     let records2: Vec<RawRecord> = (10..13)
@@ -181,14 +183,14 @@ async fn test_multiple_batches() -> Result<()> {
 
     let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
     accumulator.commit(&records2, tx2).await?;
-    let (root2, proofs2) = rx2.recv().await.unwrap();
-    println!("Batch 2 root: {:?}", hex::encode(&root2));
+    let result2 = rx2.recv().await.unwrap();
+    println!("Batch 2 root: {:?}", hex::encode(&result2.commitment));
 
     // Roots should be different (different data)
-    assert_ne!(root1, root2, "Roots should be different");
+    assert_ne!(result1.commitment, result2.commitment, "Roots should be different");
 
     // Verify proofs for second batch
-    let proofs2 = proofs2.unwrap();
+    let proofs2 = result2.proofs.unwrap();
     assert_eq!(proofs2.len(), 3, "Should have 3 proofs in batch 2");
 
     for i in 10..13 {

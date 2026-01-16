@@ -160,10 +160,10 @@ pub struct StoredProof {
 /// This is the output from RootSmith that gets sent to downstream.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommitmentResult {
-    /// Commitment data as raw bytes
+    /// Commitment data as raw bytes (root hash)
     pub commitment: Vec<u8>,
-    /// Optional flat map of key to proof bytes
-    pub proofs: Option<HashMap<Key32, Vec<u8>>>,
+    /// Optional map of key to structured proof
+    pub proofs: Option<HashMap<Key32, Proof>>,
     /// Timestamp when committed
     pub committed_at: u64,
 }

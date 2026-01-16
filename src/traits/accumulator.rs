@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use std::collections::HashMap;
 
+use crate::types::CommitmentResult;
 use crate::types::Key32;
 use crate::types::Proof;
 use crate::types::RawRecord;
@@ -31,7 +31,7 @@ pub trait Accumulator: Send + Sync {
     async fn commit(
         &mut self,
         records: &[RawRecord],
-        result_tx: tokio::sync::mpsc::UnboundedSender<(Vec<u8>, Option<HashMap<Key32, Proof>>)>,
+        result_tx: tokio::sync::mpsc::UnboundedSender<CommitmentResult>,
     ) -> Result<()>;
 
     /// Verify a proof for a specific key-value pair against a known root.

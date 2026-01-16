@@ -1,11 +1,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use std::collections::HashMap;
 
 use super::merkle_accumulator::MerkleAccumulator;
 use super::sparse_merkle_accumulator::SparseMerkleAccumulator;
 use crate::config::AccumulatorType;
 use crate::traits::Accumulator;
+use crate::types::CommitmentResult;
 use crate::types::Key32;
 use crate::types::Proof;
 use crate::types::RawRecord;
@@ -41,7 +41,7 @@ impl Accumulator for AccumulatorVariant {
     async fn commit(
         &mut self,
         records: &[RawRecord],
-        result_tx: tokio::sync::mpsc::UnboundedSender<(Vec<u8>, Option<HashMap<Key32, Proof>>)>,
+        result_tx: tokio::sync::mpsc::UnboundedSender<CommitmentResult>,
     ) -> Result<()> {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.commit(records, result_tx).await,
