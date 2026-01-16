@@ -7,6 +7,7 @@ mod commitment_registry;
 mod config;
 mod crypto;
 mod feature_select;
+mod parser;
 mod proof_delivery;
 mod proof_registry;
 mod rootsmith;
