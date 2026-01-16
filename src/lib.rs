@@ -26,6 +26,8 @@ pub use rootsmith::EpochPhase;
 pub use rootsmith::RootSmith;
 pub use storage::Storage;
 pub use traits::Accumulator;
+pub use traits::AccumulatorCommitmentResult;
+pub use traits::AccumulatorRecord;
 pub use traits::ArchiveData;
 pub use traits::ArchiveFilter;
 pub use traits::ArchiveStorage;

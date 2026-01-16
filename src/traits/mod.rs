@@ -4,6 +4,8 @@ pub mod downstream;
 pub mod upstream;
 
 pub use accumulator::Accumulator;
+pub use accumulator::AccumulatorRecord;
+pub use accumulator::CommitmentResult as AccumulatorCommitmentResult;
 pub use archive::ArchiveData;
 pub use archive::ArchiveFilter;
 pub use archive::ArchiveStorage;

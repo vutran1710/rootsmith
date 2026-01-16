@@ -1,10 +1,15 @@
 use std::collections::HashMap;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
+use async_trait::async_trait;
 use rs_merkle::algorithms::Sha256;
 use rs_merkle::Hasher;
 use rs_merkle::MerkleTree as RsMerkleTree;
 
+use crate::traits::accumulator::AccumulatorRecord;
+use crate::traits::accumulator::CommitmentResult;
 use crate::traits::Accumulator;
 use crate::types::Key32;
 use crate::types::Proof;
@@ -40,10 +45,87 @@ impl Default for MerkleAccumulator {
     }
 }
 
+#[async_trait]
 impl Accumulator for MerkleAccumulator {
     fn id(&self) -> &'static str {
         "merkle"
     }
+
+    fn commit_batch(&mut self, records: &[AccumulatorRecord]) -> Result<CommitmentResult> {
+        // Clear any existing state
+        self.flush()?;
+
+        // Add all records to the accumulator
+        for record in records {
+            self.put(record.key, record.value)?;
+        }
+
+        // Build the root
+        let root = self.build_root()?;
+
+        // Generate proofs for all records
+        let keys: Vec<Key32> = records.iter().map(|r| r.key).collect();
+        let proofs_vec = self.prove_many(&keys)?;
+
+        let mut proofs = HashMap::new();
+        for (key, proof) in proofs_vec {
+            if let Some(p) = proof {
+                proofs.insert(key, p);
+            }
+        }
+
+        let committed_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before UNIX_EPOCH")
+            .as_secs();
+
+        Ok(CommitmentResult {
+            root,
+            proofs: Some(proofs),
+            committed_at,
+        })
+    }
+
+    fn verify_proof(
+        &self,
+        root: &[u8; 32],
+        key: &Key32,
+        value: &Value32,
+        proof: Option<&Proof>,
+    ) -> Result<bool> {
+        let Some(proof) = proof else {
+            return Ok(false);
+        };
+
+        // leaf = H(value) (không cần key)
+        let mut cur = Self::leaf_hash(&key, &value);
+
+        for node in &proof.nodes {
+            if node.sibling.len() != 32 {
+                return Ok(false);
+            }
+
+            let mut sib = [0u8; 32];
+            sib.copy_from_slice(&node.sibling);
+
+            let mut buf = [0u8; 64];
+            if node.is_left {
+                // sibling || cur
+                buf[..32].copy_from_slice(&sib);
+                buf[32..].copy_from_slice(&cur);
+            } else {
+                // cur || sibling
+                buf[..32].copy_from_slice(&cur);
+                buf[32..].copy_from_slice(&sib);
+            }
+
+            cur = Sha256::hash(&buf);
+        }
+
+        Ok(&cur == root)
+    }
+
+    // ===== Legacy Methods =====
 
     fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
         let leaf = Self::leaf_hash(&key, &value);
@@ -145,45 +227,6 @@ impl Accumulator for MerkleAccumulator {
             out.push((*k, Some(Proof { nodes })));
         }
         Ok(out)
-    }
-
-    fn verify_proof(
-        &self,
-        root: &[u8; 32],
-        key: &Key32,
-        value: &Value32, // raw value
-        proof: Option<&Proof>,
-    ) -> Result<bool> {
-        let Some(proof) = proof else {
-            return Ok(false);
-        };
-
-        // leaf = H(value) (không cần key)
-        let mut cur = Self::leaf_hash(&key, &value);
-
-        for node in &proof.nodes {
-            if node.sibling.len() != 32 {
-                return Ok(false);
-            }
-
-            let mut sib = [0u8; 32];
-            sib.copy_from_slice(&node.sibling);
-
-            let mut buf = [0u8; 64];
-            if node.is_left {
-                // sibling || cur
-                buf[..32].copy_from_slice(&sib);
-                buf[32..].copy_from_slice(&cur);
-            } else {
-                // cur || sibling
-                buf[..32].copy_from_slice(&cur);
-                buf[32..].copy_from_slice(&sib);
-            }
-
-            cur = Sha256::hash(&buf);
-        }
-
-        Ok(&cur == root)
     }
 
     fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {

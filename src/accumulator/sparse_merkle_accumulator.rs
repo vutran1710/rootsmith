@@ -1,6 +1,9 @@
 use std::sync::Mutex;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
+use async_trait::async_trait;
 use monotree::database::MemoryDB;
 use monotree::hasher::Blake3 as MonotreeBlake3;
 use monotree::hasher::Hasher;
@@ -8,6 +11,8 @@ use monotree::verify_proof as monotree_verify_proof;
 use monotree::Hash;
 use monotree::Monotree;
 
+use crate::traits::accumulator::AccumulatorRecord;
+use crate::traits::accumulator::CommitmentResult;
 use crate::traits::Accumulator;
 use crate::types::Key32;
 use crate::types::Proof;
@@ -55,60 +60,45 @@ impl Default for SparseMerkleAccumulator {
     }
 }
 
+#[async_trait]
 impl Accumulator for SparseMerkleAccumulator {
     fn id(&self) -> &'static str {
         "sparse-merkle"
     }
 
-    fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
-        let key_hash = Hash::from(key);
-        let leaf = Self::leaf_hash(&key, &value);
+    fn commit_batch(&mut self, records: &[AccumulatorRecord]) -> Result<CommitmentResult> {
+        // Clear any existing state
+        self.flush()?;
 
-        let mut tree = self.tree.lock().unwrap();
-        let mut root = self.root.lock().unwrap();
-
-        let new_root = tree
-            .insert(root.as_ref(), &key_hash, &leaf)
-            .map_err(|e| anyhow::anyhow!("Failed to insert into tree: {:?}", e))?;
-
-        *root = new_root;
-        Ok(())
-    }
-
-    fn build_root(&self) -> Result<Vec<u8>> {
-        let root = self.root.lock().unwrap();
-        Ok(match &*root {
-            Some(r) => r.as_ref().to_vec(),
-            None => vec![0u8; 32],
-        })
-    }
-
-    fn prove(&self, key: &Key32) -> Result<Option<Proof>> {
-        let key_hash = Hash::from(*key);
-
-        let mut tree = self.tree.lock().unwrap();
-        let root = self.root.lock().unwrap();
-
-        if root.is_none() {
-            return Ok(None);
+        // Add all records to the accumulator
+        for record in records {
+            self.put(record.key, record.value)?;
         }
 
-        // ✅ yêu cầu: nếu get_merkle_proof lỗi => return Ok(None)
-        let monotree_proof = match tree.get_merkle_proof(root.as_ref(), &key_hash) {
-            Ok(p) => p,
-            Err(_) => return Ok(None),
-        };
+        // Build the root
+        let root = self.build_root()?;
 
-        let Some(monotree_proof) = monotree_proof else {
-            return Ok(None);
-        };
+        // Generate proofs for all records
+        let keys: Vec<Key32> = records.iter().map(|r| r.key).collect();
+        let proofs_vec = self.prove_many(&keys)?;
 
-        let nodes: Vec<ProofNode> = monotree_proof
-            .into_iter()
-            .map(|(is_left, sibling)| ProofNode { is_left, sibling })
-            .collect();
+        let mut proofs = std::collections::HashMap::new();
+        for (key, proof) in proofs_vec {
+            if let Some(p) = proof {
+                proofs.insert(key, p);
+            }
+        }
 
-        Ok(Some(Proof { nodes }))
+        let committed_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before UNIX_EPOCH")
+            .as_secs();
+
+        Ok(CommitmentResult {
+            root,
+            proofs: Some(proofs),
+            committed_at,
+        })
     }
 
     fn verify_proof(
@@ -161,6 +151,59 @@ impl Accumulator for SparseMerkleAccumulator {
         );
 
         Ok(ok)
+    }
+
+    // ===== Legacy Methods =====
+
+    fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
+        let key_hash = Hash::from(key);
+        let leaf = Self::leaf_hash(&key, &value);
+
+        let mut tree = self.tree.lock().unwrap();
+        let mut root = self.root.lock().unwrap();
+
+        let new_root = tree
+            .insert(root.as_ref(), &key_hash, &leaf)
+            .map_err(|e| anyhow::anyhow!("Failed to insert into tree: {:?}", e))?;
+
+        *root = new_root;
+        Ok(())
+    }
+
+    fn build_root(&self) -> Result<Vec<u8>> {
+        let root = self.root.lock().unwrap();
+        Ok(match &*root {
+            Some(r) => r.as_ref().to_vec(),
+            None => vec![0u8; 32],
+        })
+    }
+
+    fn prove(&self, key: &Key32) -> Result<Option<Proof>> {
+        let key_hash = Hash::from(*key);
+
+        let mut tree = self.tree.lock().unwrap();
+        let root = self.root.lock().unwrap();
+
+        if root.is_none() {
+            return Ok(None);
+        }
+
+        // ✅ yêu cầu: nếu get_merkle_proof lỗi => return Ok(None)
+        let monotree_proof = match tree.get_merkle_proof(root.as_ref(), &key_hash) {
+            Ok(p) => p,
+            Err(_) => return Ok(None),
+        };
+
+        let Some(monotree_proof) = monotree_proof else {
+            return Ok(None);
+        };
+
+        let nodes: Vec<ProofNode> = monotree_proof
+            .into_iter()
+            .map(|(is_left, sibling)| ProofNode { is_left, sibling })
+            .collect();
+
+        Ok(Some(Proof { nodes }))
     }
 
     fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {

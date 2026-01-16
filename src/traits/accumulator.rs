@@ -1,33 +1,86 @@
 use anyhow::Result;
+use async_trait::async_trait;
+use std::collections::HashMap;
 
 use crate::types::Key32;
 use crate::types::Proof;
 use crate::types::Value32;
 
-/// Stateful cryptographic accumulator.
+/// Record to be accumulated in a batch.
+#[derive(Debug, Clone)]
+pub struct AccumulatorRecord {
+    pub key: Key32,
+    pub value: Value32,
+}
+
+/// Result of a commitment operation.
+#[derive(Debug, Clone)]
+pub struct CommitmentResult {
+    /// The Merkle root or commitment hash
+    pub root: Vec<u8>,
+    /// Optional proofs for each record
+    pub proofs: Option<HashMap<Key32, Proof>>,
+    /// Timestamp when the commitment was created
+    pub committed_at: u64,
+}
+
+/// Stateful cryptographic accumulator with support for both sync and async operations.
 ///
-/// The implementation maintains internal state of inserted leaves
-/// (within the current batch/window).
+/// The accumulator is a blackbox module that can handle batch processing of records.
+/// It produces commitment results that may be delivered synchronously or asynchronously
+/// via channels (e.g., when sending to external services that take hours to respond).
+#[async_trait]
 pub trait Accumulator: Send + Sync {
     /// Identifier for logging/telemetry (e.g. "merkle", "sparse-merkle").
     fn id(&self) -> &'static str;
-    fn put(&mut self, key: Key32, value: Value32) -> Result<()>;
-    fn build_root(&self) -> Result<Vec<u8>>; // fixed 32-byte ???
-    fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool>;
 
-    /// Verify that `key` is *not* included under the current root.
-    fn verify_non_inclusion(&self, key: &Key32) -> Result<bool>;
+    /// Process a batch of records and produce a commitment result synchronously.
+    ///
+    /// This is the primary method for batch commitment. It takes an array of records
+    /// and returns the commitment result immediately (blocking/synchronous).
+    ///
+    /// # Arguments
+    /// * `records` - Array of records to accumulate
+    ///
+    /// # Returns
+    /// * `CommitmentResult` - Contains root hash and optional proofs
+    fn commit_batch(&mut self, records: &[AccumulatorRecord]) -> Result<CommitmentResult>;
 
-    /// Flush/reset internal state, preparing for a new batch.
-    fn flush(&mut self) -> Result<()>;
-    fn prove(&self, key: &Key32) -> Result<Option<Proof>>;
-    fn prove_many(&self, keys: &[Key32]) -> Result<Vec<(Key32, Option<Proof>)>> {
-        let mut out = Vec::with_capacity(keys.len());
-        for k in keys {
-            out.push((*k, self.prove(k)?));
-        }
-        Ok(out)
+    /// Process a batch of records and send the commitment result asynchronously via a channel.
+    ///
+    /// This method is for accumulators that need to interact with external services
+    /// (e.g., blockchain, external prover) where the result may not be available immediately.
+    /// The result will be sent through the provided channel when ready.
+    ///
+    /// # Arguments
+    /// * `records` - Array of records to accumulate
+    /// * `result_tx` - Channel sender for delivering the commitment result asynchronously
+    ///
+    /// # Returns
+    /// * `Ok(())` if the async operation was started successfully
+    async fn commit_batch_async(
+        &mut self,
+        records: &[AccumulatorRecord],
+        result_tx: tokio::sync::mpsc::UnboundedSender<CommitmentResult>,
+    ) -> Result<()> {
+        // Default implementation: compute synchronously and send via channel
+        let result = self.commit_batch(records)?;
+        result_tx
+            .send(result)
+            .map_err(|_| anyhow::anyhow!("Failed to send commitment result"))?;
+        Ok(())
     }
+
+    /// Verify a proof for a specific key-value pair against a known root.
+    ///
+    /// # Arguments
+    /// * `root` - The commitment root to verify against
+    /// * `key` - The key being proved
+    /// * `value` - The value being proved
+    /// * `proof` - The proof to verify
+    ///
+    /// # Returns
+    /// * `true` if the proof is valid, `false` otherwise
     fn verify_proof(
         &self,
         root: &[u8; 32],
@@ -35,4 +88,35 @@ pub trait Accumulator: Send + Sync {
         value: &Value32,
         proof: Option<&Proof>,
     ) -> Result<bool>;
+
+    // ===== Legacy Methods (for backward compatibility) =====
+    // These methods are kept for existing code that uses the old interface.
+    // New code should use commit_batch/commit_batch_async instead.
+
+    /// Legacy: Insert a single key-value pair (backward compatibility).
+    fn put(&mut self, key: Key32, value: Value32) -> Result<()>;
+
+    /// Legacy: Build root from accumulated state (backward compatibility).
+    fn build_root(&self) -> Result<Vec<u8>>;
+
+    /// Legacy: Verify inclusion of a key-value pair (backward compatibility).
+    fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool>;
+
+    /// Legacy: Verify non-inclusion of a key (backward compatibility).
+    fn verify_non_inclusion(&self, key: &Key32) -> Result<bool>;
+
+    /// Legacy: Flush/reset internal state (backward compatibility).
+    fn flush(&mut self) -> Result<()>;
+
+    /// Legacy: Generate proof for a single key (backward compatibility).
+    fn prove(&self, key: &Key32) -> Result<Option<Proof>>;
+
+    /// Legacy: Generate proofs for multiple keys (backward compatibility).
+    fn prove_many(&self, keys: &[Key32]) -> Result<Vec<(Key32, Option<Proof>)>> {
+        let mut out = Vec::with_capacity(keys.len());
+        for k in keys {
+            out.push((*k, self.prove(k)?));
+        }
+        Ok(out)
+    }
 }
