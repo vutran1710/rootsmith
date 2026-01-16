@@ -95,13 +95,10 @@ impl Accumulator for SparseMerkleAccumulator {
         let root = self.build_root()?;
 
         // Generate proofs for all records
-        let keys: Vec<Key32> = records.iter().map(|r| r.key).collect();
-        let proofs_vec = self.prove_many(&keys)?;
-
         let mut proofs = HashMap::new();
-        for (key, proof) in proofs_vec {
-            if let Some(p) = proof {
-                proofs.insert(key, p);
+        for record in records {
+            if let Some(proof) = self.prove(&record.key)? {
+                proofs.insert(record.key, proof);
             }
         }
 
@@ -230,14 +227,6 @@ impl SparseMerkleAccumulator {
             .collect();
 
         Ok(Some(Proof { nodes }))
-    }
-
-    fn prove_many(&self, keys: &[Key32]) -> Result<Vec<(Key32, Option<Proof>)>> {
-        let mut out = Vec::with_capacity(keys.len());
-        for k in keys {
-            out.push((*k, self.prove(k)?));
-        }
-        Ok(out)
     }
 
     fn flush(&mut self) -> Result<()> {
