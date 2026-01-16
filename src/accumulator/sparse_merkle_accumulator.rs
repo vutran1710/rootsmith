@@ -140,7 +140,10 @@ impl Accumulator for SparseMerkleAccumulator {
 
         Ok(())
     }
+}
 
+// ===== Private Helper Methods =====
+impl SparseMerkleAccumulator {
     fn verify_proof(
         &self,
         root: &[u8; 32],
@@ -192,10 +195,7 @@ impl Accumulator for SparseMerkleAccumulator {
 
         Ok(ok)
     }
-}
 
-// ===== Private Helper Methods =====
-impl SparseMerkleAccumulator {
     fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
         let key_hash = Hash::from(key);
         let leaf = Self::leaf_hash(&key, &value);

@@ -3,8 +3,6 @@ use async_trait::async_trait;
 use kanal::AsyncSender;
 
 use crate::types::CommitmentResult;
-use crate::types::Key32;
-use crate::types::Proof;
 use crate::types::RawRecord;
 
 /// Stateful cryptographic accumulator with async batch processing.
@@ -33,22 +31,4 @@ pub trait Accumulator: Send + Sync {
         records: &[RawRecord],
         result_tx: AsyncSender<CommitmentResult>,
     ) -> Result<()>;
-
-    /// Verify a proof for a specific key-value pair against a known root.
-    ///
-    /// # Arguments
-    /// * `root` - The commitment root to verify against
-    /// * `key` - The key being proved
-    /// * `value` - The value being proved
-    /// * `proof` - The proof to verify
-    ///
-    /// # Returns
-    /// * `true` if the proof is valid, `false` otherwise
-    fn verify_proof(
-        &self,
-        root: &[u8; 32],
-        key: &Key32,
-        value: &[u8],
-        proof: Option<&Proof>,
-    ) -> Result<bool>;
 }

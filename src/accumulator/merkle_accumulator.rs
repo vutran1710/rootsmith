@@ -102,7 +102,10 @@ impl Accumulator for MerkleAccumulator {
 
         Ok(())
     }
+}
 
+// ===== Private Helper Methods =====
+impl MerkleAccumulator {
     fn verify_proof(
         &self,
         root: &[u8; 32],
@@ -141,10 +144,7 @@ impl Accumulator for MerkleAccumulator {
 
         Ok(&cur == root)
     }
-}
 
-// ===== Private Helper Methods =====
-impl MerkleAccumulator {
     fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
         let leaf = Self::leaf_hash(&key, &value);
         let index = self.leaves.len();
