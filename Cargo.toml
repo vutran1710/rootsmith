@@ -36,25 +36,6 @@ multiple-circuit-verifier = { git = "ssh://git@github.com/OneMatrixL1/multiple-r
 # optional future deps:
 # rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
 
-[build-dependencies]
-prost-build = "0.13"
-
-[features]
-default = ["backend-merkle", "commitment-reg-contract", "proof-s3"]
-
-# backends
-backend-merkle = []
-backend-sparse-merkle = []
-
-# commitment registries
-commitment-reg-contract = []
-commitment-reg-none = []
-
-# proof registries
-proof-s3 = []
-proof-github = []
-proof-contract = []
-
 [dev-dependencies]
 tempfile = "3"
 criterion = "0.5"
