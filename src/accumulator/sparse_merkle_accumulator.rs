@@ -94,13 +94,30 @@ impl Accumulator for SparseMerkleAccumulator {
         // Build the root
         let root = self.build_root()?;
 
-        // Generate proofs for all records
+        // Generate proofs for all records with a single lock
         let mut proofs = HashMap::new();
-        for record in records {
-            if let Some(proof) = self.prove(&record.key)? {
-                proofs.insert(record.key, proof);
+        {
+            let mut tree = self.tree.lock().unwrap();
+            let tree_root = self.root.lock().unwrap();
+
+            if tree_root.is_some() {
+                for record in records {
+                    let key_hash = Hash::from(record.key);
+                    let monotree_proof = match tree.get_merkle_proof(tree_root.as_ref(), &key_hash)
+                    {
+                        Ok(Some(p)) => p,
+                        _ => continue,
+                    };
+
+                    let nodes: Vec<ProofNode> = monotree_proof
+                        .into_iter()
+                        .map(|(is_left, sibling)| ProofNode { is_left, sibling })
+                        .collect();
+
+                    proofs.insert(record.key, Proof { nodes });
+                }
             }
-        }
+        } // Locks are dropped here
 
         // Get current timestamp
         let committed_at = SystemTime::now()
