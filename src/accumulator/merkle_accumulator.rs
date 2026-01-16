@@ -4,6 +4,7 @@ use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use kanal::AsyncSender;
 use rs_merkle::algorithms::Sha256;
 use rs_merkle::Hasher;
 use rs_merkle::MerkleTree as RsMerkleTree;
@@ -54,7 +55,7 @@ impl Accumulator for MerkleAccumulator {
     async fn commit(
         &mut self,
         records: &[RawRecord],
-        result_tx: tokio::sync::mpsc::UnboundedSender<CommitmentResult>,
+        result_tx: AsyncSender<CommitmentResult>,
     ) -> Result<()> {
         // Clear any existing state
         self.flush()?;
@@ -96,7 +97,8 @@ impl Accumulator for MerkleAccumulator {
 
         result_tx
             .send(result)
-            .map_err(|_| anyhow::anyhow!("Failed to send commitment result"))?;
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send commitment result: {}", e))?;
 
         Ok(())
     }

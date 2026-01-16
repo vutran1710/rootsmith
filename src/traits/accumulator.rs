@@ -1,5 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use kanal::AsyncSender;
 
 use crate::types::CommitmentResult;
 use crate::types::Key32;
@@ -31,7 +32,7 @@ pub trait Accumulator: Send + Sync {
     async fn commit(
         &mut self,
         records: &[RawRecord],
-        result_tx: tokio::sync::mpsc::UnboundedSender<CommitmentResult>,
+        result_tx: AsyncSender<CommitmentResult>,
     ) -> Result<()>;
 
     /// Verify a proof for a specific key-value pair against a known root.

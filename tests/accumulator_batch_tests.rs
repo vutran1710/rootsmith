@@ -1,4 +1,5 @@
 use anyhow::Result;
+use kanal::unbounded_async;
 use rootsmith::accumulator::AccumulatorVariant;
 use rootsmith::config::AccumulatorType;
 use rootsmith::types::RawRecord;
@@ -29,14 +30,14 @@ async fn test_merkle_accumulator_commit() -> Result<()> {
         .collect();
 
     // Create channel for receiving results
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, rx) = unbounded_async();
 
     // Commit batch
     accumulator.commit(&records, tx).await?;
 
     // Receive the result
     let result = rx.recv().await;
-    assert!(result.is_some(), "Should receive a result");
+    assert!(result.is_ok(), "Should receive a result");
 
     let result = result.unwrap();
 
@@ -81,14 +82,14 @@ async fn test_sparse_merkle_accumulator_commit() -> Result<()> {
         .collect();
 
     // Create channel for receiving results
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, rx) = unbounded_async();
 
     // Commit batch
     accumulator.commit(&records, tx).await?;
 
     // Receive the result
     let result = rx.recv().await;
-    assert!(result.is_some(), "Should receive a result");
+    assert!(result.is_ok(), "Should receive a result");
 
     let result = result.unwrap();
 
@@ -128,14 +129,14 @@ async fn test_empty_batch() -> Result<()> {
     let records: Vec<RawRecord> = vec![];
 
     // Create channel for receiving results
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, rx) = unbounded_async();
 
     // Commit empty batch
     accumulator.commit(&records, tx).await?;
 
     // Receive the result
     let result = rx.recv().await;
-    assert!(result.is_some(), "Should receive a result");
+    assert!(result.is_ok(), "Should receive a result");
 
     let result = result.unwrap();
 
@@ -168,7 +169,7 @@ async fn test_multiple_batches() -> Result<()> {
         })
         .collect();
 
-    let (tx1, mut rx1) = tokio::sync::mpsc::unbounded_channel();
+    let (tx1, rx1) = unbounded_async();
     accumulator.commit(&records1, tx1).await?;
     let result1 = rx1.recv().await.unwrap();
     println!("Batch 1 root: {:?}", hex::encode(&result1.commitment));
@@ -181,7 +182,7 @@ async fn test_multiple_batches() -> Result<()> {
         })
         .collect();
 
-    let (tx2, mut rx2) = tokio::sync::mpsc::unbounded_channel();
+    let (tx2, rx2) = unbounded_async();
     accumulator.commit(&records2, tx2).await?;
     let result2 = rx2.recv().await.unwrap();
     println!("Batch 2 root: {:?}", hex::encode(&result2.commitment));

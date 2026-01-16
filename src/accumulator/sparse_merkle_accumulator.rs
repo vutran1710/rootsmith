@@ -1,9 +1,11 @@
+use std::collections::HashMap;
 use std::sync::Mutex;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use kanal::AsyncSender;
 use monotree::database::MemoryDB;
 use monotree::hasher::Blake3 as MonotreeBlake3;
 use monotree::hasher::Hasher;
@@ -69,7 +71,7 @@ impl Accumulator for SparseMerkleAccumulator {
     async fn commit(
         &mut self,
         records: &[RawRecord],
-        result_tx: tokio::sync::mpsc::UnboundedSender<CommitmentResult>,
+        result_tx: AsyncSender<CommitmentResult>,
     ) -> Result<()> {
         // Clear any existing state
         self.flush()?;
@@ -96,7 +98,7 @@ impl Accumulator for SparseMerkleAccumulator {
         let keys: Vec<Key32> = records.iter().map(|r| r.key).collect();
         let proofs_vec = self.prove_many(&keys)?;
 
-        let mut proofs = std::collections::HashMap::new();
+        let mut proofs = HashMap::new();
         for (key, proof) in proofs_vec {
             if let Some(p) = proof {
                 proofs.insert(key, p);
@@ -118,7 +120,8 @@ impl Accumulator for SparseMerkleAccumulator {
 
         result_tx
             .send(result)
-            .map_err(|_| anyhow::anyhow!("Failed to send commitment result"))?;
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to send commitment result: {}", e))?;
 
         Ok(())
     }
