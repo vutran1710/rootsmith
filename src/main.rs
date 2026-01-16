@@ -6,12 +6,14 @@ mod accumulator;
 mod archiver;
 mod config;
 mod downstream;
+mod parser;
 mod rootsmith;
 mod storage;
 mod telemetry;
 mod traits;
 mod types;
 mod upstream;
+mod wasm_host;
 
 use config::BaseConfig;
 use rootsmith::RootSmith;
@@ -30,9 +32,10 @@ async fn main() -> Result<()> {
     );
 
     // Initialize and run the app
-    let app = RootSmith::initialize(config).await?;
-    app.run().await?;
+    let _app = RootSmith::initialize(config).await?;
+    // TODO: Implement RootSmith::run() method
+    // app.run().await?;
 
-    info!("Rootsmith shutdown complete");
+    info!("Rootsmith initialized (run() not yet implemented)");
     Ok(())
 }
