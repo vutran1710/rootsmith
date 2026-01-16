@@ -41,7 +41,3 @@ tempfile = "3"
 criterion = "0.5"
 anyhow = "1"
 rand = "0.8"
-
-[[bench]]
-name = "prove_10k"
-harness = false

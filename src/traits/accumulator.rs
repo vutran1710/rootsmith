@@ -1,38 +1,34 @@
 use anyhow::Result;
+use async_trait::async_trait;
+use kanal::AsyncSender;
 
-use crate::types::Key32;
-use crate::types::Proof;
-use crate::types::Value32;
+use crate::types::CommitmentResult;
+use crate::types::RawRecord;
 
-/// Stateful cryptographic accumulator.
+/// Stateful cryptographic accumulator with async batch processing.
 ///
-/// The implementation maintains internal state of inserted leaves
-/// (within the current batch/window).
+/// The accumulator is a blackbox module that handles batch processing of records.
+/// It produces commitment results that are delivered asynchronously via channels,
+/// supporting scenarios where commitment may take hours (e.g., external services).
+#[async_trait]
 pub trait Accumulator: Send + Sync {
     /// Identifier for logging/telemetry (e.g. "merkle", "sparse-merkle").
     fn id(&self) -> &'static str;
-    fn put(&mut self, key: Key32, value: Value32) -> Result<()>;
-    fn build_root(&self) -> Result<Vec<u8>>; // fixed 32-byte ???
-    fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool>;
 
-    /// Verify that `key` is *not* included under the current root.
-    fn verify_non_inclusion(&self, key: &Key32) -> Result<bool>;
-
-    /// Flush/reset internal state, preparing for a new batch.
-    fn flush(&mut self) -> Result<()>;
-    fn prove(&self, key: &Key32) -> Result<Option<Proof>>;
-    fn prove_many(&self, keys: &[Key32]) -> Result<Vec<(Key32, Option<Proof>)>> {
-        let mut out = Vec::with_capacity(keys.len());
-        for k in keys {
-            out.push((*k, self.prove(k)?));
-        }
-        Ok(out)
-    }
-    fn verify_proof(
-        &self,
-        root: &[u8; 32],
-        key: &Key32,
-        value: &Value32,
-        proof: Option<&Proof>,
-    ) -> Result<bool>;
+    /// Process a batch of records and send the commitment result asynchronously via a channel.
+    ///
+    /// This is the primary method for batch commitment. It processes records and sends
+    /// the result (root hash and proofs) through the provided channel when ready.
+    ///
+    /// # Arguments
+    /// * `records` - Array of raw records to accumulate
+    /// * `result_tx` - Channel sender for delivering the commitment result
+    ///
+    /// # Returns
+    /// * `Ok(())` if the operation completed successfully
+    async fn commit(
+        &mut self,
+        records: &[RawRecord],
+        result_tx: AsyncSender<CommitmentResult>,
+    ) -> Result<()>;
 }
