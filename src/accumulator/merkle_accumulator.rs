@@ -102,7 +102,10 @@ impl Accumulator for MerkleAccumulator {
 
         Ok(())
     }
+}
 
+// ===== Private Helper Methods =====
+impl MerkleAccumulator {
     fn verify_proof(
         &self,
         root: &[u8; 32],
@@ -141,8 +144,6 @@ impl Accumulator for MerkleAccumulator {
 
         Ok(&cur == root)
     }
-
-    // ===== Legacy Methods =====
 
     fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
         let leaf = Self::leaf_hash(&key, &value);
@@ -244,28 +245,5 @@ impl Accumulator for MerkleAccumulator {
             out.push((*k, Some(Proof { nodes })));
         }
         Ok(out)
-    }
-
-    fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {
-        if value.len() != 32 {
-            return Ok(false);
-        }
-
-        let idx = match self.key_to_index.get(key).copied() {
-            Some(i) => i,
-            None => return Ok(false),
-        };
-
-        let mut v = [0u8; 32];
-        v.copy_from_slice(value);
-
-        // Reconstruct leaf hash using the same scheme as in put(): H(key || value)
-        let leaf = Self::leaf_hash(key, &v);
-
-        Ok(self.leaves.get(idx) == Some(&leaf))
-    }
-
-    fn verify_non_inclusion(&self, _key: &Key32) -> Result<bool> {
-        Ok(false)
     }
 }

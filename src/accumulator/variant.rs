@@ -7,10 +7,7 @@ use super::sparse_merkle_accumulator::SparseMerkleAccumulator;
 use crate::config::AccumulatorType;
 use crate::traits::Accumulator;
 use crate::types::CommitmentResult;
-use crate::types::Key32;
-use crate::types::Proof;
 use crate::types::RawRecord;
-use crate::types::Value32;
 
 /// Enum representing all possible accumulator implementations.
 pub enum AccumulatorVariant {
@@ -47,63 +44,6 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.commit(records, result_tx).await,
             AccumulatorVariant::SparseMerkle(inner) => inner.commit(records, result_tx).await,
-        }
-    }
-
-    fn verify_proof(
-        &self,
-        root: &[u8; 32],
-        key: &Key32,
-        value: &[u8],
-        proof: Option<&Proof>,
-    ) -> Result<bool> {
-        match self {
-            AccumulatorVariant::Merkle(inner) => inner.verify_proof(root, key, value, proof),
-            AccumulatorVariant::SparseMerkle(inner) => inner.verify_proof(root, key, value, proof),
-        }
-    }
-
-    // ===== Legacy Methods =====
-
-    fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
-        match self {
-            AccumulatorVariant::Merkle(inner) => inner.put(key, value),
-            AccumulatorVariant::SparseMerkle(inner) => inner.put(key, value),
-        }
-    }
-
-    fn build_root(&self) -> Result<Vec<u8>> {
-        match self {
-            AccumulatorVariant::Merkle(inner) => inner.build_root(),
-            AccumulatorVariant::SparseMerkle(inner) => inner.build_root(),
-        }
-    }
-
-    fn verify_inclusion(&self, key: &Key32, value: &[u8]) -> Result<bool> {
-        match self {
-            AccumulatorVariant::Merkle(inner) => inner.verify_inclusion(key, value),
-            AccumulatorVariant::SparseMerkle(inner) => inner.verify_inclusion(key, value),
-        }
-    }
-
-    fn verify_non_inclusion(&self, key: &Key32) -> Result<bool> {
-        match self {
-            AccumulatorVariant::Merkle(inner) => inner.verify_non_inclusion(key),
-            AccumulatorVariant::SparseMerkle(inner) => inner.verify_non_inclusion(key),
-        }
-    }
-
-    fn flush(&mut self) -> Result<()> {
-        match self {
-            AccumulatorVariant::Merkle(inner) => inner.flush(),
-            AccumulatorVariant::SparseMerkle(inner) => inner.flush(),
-        }
-    }
-
-    fn prove(&self, key: &Key32) -> Result<Option<Proof>> {
-        match self {
-            AccumulatorVariant::Merkle(inner) => inner.prove(key),
-            AccumulatorVariant::SparseMerkle(inner) => inner.prove(key),
         }
     }
 }
