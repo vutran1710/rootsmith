@@ -1,11 +1,97 @@
 use std::collections::HashMap;
 
+use anyhow;
 use serde::Deserialize;
 use serde::Serialize;
 
 pub type Namespace = [u8; 32];
 pub type Key32 = [u8; 32];
 pub type Value32 = [u8; 32];
+
+/// Raw record as found in the database.
+/// This is the minimal record format with key and value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RawRecord {
+    pub key: Key32,
+    pub value: Vec<u8>,
+}
+
+/// Fine record with complete metadata and clear format.
+/// This is the enriched record format used across components.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FineRecord {
+    pub namespace: String,
+    pub key: Key32,
+    pub value: Vec<u8>,
+    pub timestamp: u64,
+    pub metadata: Option<serde_json::Value>,
+}
+
+// Conversion from IncomingRecord to RawRecord
+impl From<IncomingRecord> for RawRecord {
+    fn from(record: IncomingRecord) -> Self {
+        RawRecord {
+            key: record.key,
+            value: record.value.to_vec(),
+        }
+    }
+}
+
+// Conversion from IncomingRecord to FineRecord
+impl From<IncomingRecord> for FineRecord {
+    fn from(record: IncomingRecord) -> Self {
+        FineRecord {
+            namespace: hex::encode(record.namespace),
+            key: record.key,
+            value: record.value.to_vec(),
+            timestamp: record.timestamp,
+            metadata: None,
+        }
+    }
+}
+
+// Conversion from FineRecord to RawRecord
+impl From<FineRecord> for RawRecord {
+    fn from(record: FineRecord) -> Self {
+        RawRecord {
+            key: record.key,
+            value: record.value,
+        }
+    }
+}
+
+// Conversion from FineRecord to IncomingRecord
+impl TryFrom<FineRecord> for IncomingRecord {
+    type Error = anyhow::Error;
+
+    fn try_from(record: FineRecord) -> Result<Self, Self::Error> {
+        // Parse namespace from hex string
+        let namespace_bytes = hex::decode(&record.namespace)
+            .map_err(|e| anyhow::anyhow!("Invalid namespace hex: {}", e))?;
+        
+        if namespace_bytes.len() != 32 {
+            return Err(anyhow::anyhow!("Namespace must be 32 bytes, got {}", namespace_bytes.len()));
+        }
+        
+        let mut namespace = [0u8; 32];
+        namespace.copy_from_slice(&namespace_bytes);
+        
+        // Ensure value is exactly 32 bytes
+        if record.value.len() != 32 {
+            return Err(anyhow::anyhow!("Value must be 32 bytes for IncomingRecord, got {}", record.value.len()));
+        }
+        
+        let mut value = [0u8; 32];
+        value.copy_from_slice(&record.value);
+        
+        Ok(IncomingRecord {
+            namespace,
+            key: record.key,
+            value,
+            timestamp: record.timestamp,
+        })
+    }
+}
 
 /// Incoming data unit from upstream connectors.
 #[derive(Debug, Clone, Serialize, Deserialize)]

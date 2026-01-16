@@ -1,6 +1,4 @@
 use std::sync::Mutex;
-use std::time::SystemTime;
-use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -11,12 +9,11 @@ use monotree::verify_proof as monotree_verify_proof;
 use monotree::Hash;
 use monotree::Monotree;
 
-use crate::traits::accumulator::AccumulatorRecord;
-use crate::traits::accumulator::CommitmentResult;
 use crate::traits::Accumulator;
 use crate::types::Key32;
 use crate::types::Proof;
 use crate::types::ProofNode;
+use crate::types::RawRecord;
 use crate::types::Value32;
 
 /// Sparse Merkle tree based accumulator using monotree library.
@@ -35,10 +32,10 @@ impl SparseMerkleAccumulator {
 
     /// leaf = H(key || value) (32 bytes)  -- dùng blake3 crate để hash bytes
     #[inline]
-    fn leaf_hash(key: &Key32, value: &Value32) -> Hash {
-        let mut buf = [0u8; 64];
-        buf[..32].copy_from_slice(key);
-        buf[32..].copy_from_slice(value);
+    fn leaf_hash(key: &Key32, value: &[u8]) -> Hash {
+        let mut buf = Vec::with_capacity(key.len() + value.len());
+        buf.extend_from_slice(key);
+        buf.extend_from_slice(value);
 
         let out = blake3::hash(&buf); // 32 bytes
         let mut arr = [0u8; 32];
@@ -66,13 +63,23 @@ impl Accumulator for SparseMerkleAccumulator {
         "sparse-merkle"
     }
 
-    fn commit_batch(&mut self, records: &[AccumulatorRecord]) -> Result<CommitmentResult> {
+    fn commit_batch(&mut self, records: &[RawRecord]) -> Result<(Vec<u8>, Option<std::collections::HashMap<Key32, Proof>>)> {
         // Clear any existing state
         self.flush()?;
 
         // Add all records to the accumulator
         for record in records {
-            self.put(record.key, record.value)?;
+            let key_hash = Hash::from(record.key);
+            let leaf = Self::leaf_hash(&record.key, &record.value);
+
+            let mut tree = self.tree.lock().unwrap();
+            let mut root = self.root.lock().unwrap();
+
+            let new_root = tree
+                .insert(root.as_ref(), &key_hash, &leaf)
+                .map_err(|e| anyhow::anyhow!("Failed to insert into tree: {:?}", e))?;
+
+            *root = new_root;
         }
 
         // Build the root
@@ -89,23 +96,14 @@ impl Accumulator for SparseMerkleAccumulator {
             }
         }
 
-        let committed_at = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("System time before UNIX_EPOCH")
-            .as_secs();
-
-        Ok(CommitmentResult {
-            root,
-            proofs: Some(proofs),
-            committed_at,
-        })
+        Ok((root, Some(proofs)))
     }
 
     fn verify_proof(
         &self,
         root: &[u8; 32],
         key: &Key32,
-        value: &Value32,
+        value: &[u8],
         proof: Option<&Proof>,
     ) -> Result<bool> {
         let Some(proof) = proof else {

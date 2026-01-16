@@ -4,25 +4,8 @@ use std::collections::HashMap;
 
 use crate::types::Key32;
 use crate::types::Proof;
+use crate::types::RawRecord;
 use crate::types::Value32;
-
-/// Record to be accumulated in a batch.
-#[derive(Debug, Clone)]
-pub struct AccumulatorRecord {
-    pub key: Key32,
-    pub value: Value32,
-}
-
-/// Result of a commitment operation.
-#[derive(Debug, Clone)]
-pub struct CommitmentResult {
-    /// The Merkle root or commitment hash
-    pub root: Vec<u8>,
-    /// Optional proofs for each record
-    pub proofs: Option<HashMap<Key32, Proof>>,
-    /// Timestamp when the commitment was created
-    pub committed_at: u64,
-}
 
 /// Stateful cryptographic accumulator with support for both sync and async operations.
 ///
@@ -40,11 +23,11 @@ pub trait Accumulator: Send + Sync {
     /// and returns the commitment result immediately (blocking/synchronous).
     ///
     /// # Arguments
-    /// * `records` - Array of records to accumulate
+    /// * `records` - Array of raw records to accumulate
     ///
     /// # Returns
-    /// * `CommitmentResult` - Contains root hash and optional proofs
-    fn commit_batch(&mut self, records: &[AccumulatorRecord]) -> Result<CommitmentResult>;
+    /// * Root hash and optional structured proofs
+    fn commit_batch(&mut self, records: &[RawRecord]) -> Result<(Vec<u8>, Option<HashMap<Key32, Proof>>)>;
 
     /// Process a batch of records and send the commitment result asynchronously via a channel.
     ///
@@ -53,15 +36,15 @@ pub trait Accumulator: Send + Sync {
     /// The result will be sent through the provided channel when ready.
     ///
     /// # Arguments
-    /// * `records` - Array of records to accumulate
+    /// * `records` - Array of raw records to accumulate
     /// * `result_tx` - Channel sender for delivering the commitment result asynchronously
     ///
     /// # Returns
     /// * `Ok(())` if the async operation was started successfully
     async fn commit_batch_async(
         &mut self,
-        records: &[AccumulatorRecord],
-        result_tx: tokio::sync::mpsc::UnboundedSender<CommitmentResult>,
+        records: &[RawRecord],
+        result_tx: tokio::sync::mpsc::UnboundedSender<(Vec<u8>, Option<HashMap<Key32, Proof>>)>,
     ) -> Result<()> {
         // Default implementation: compute synchronously and send via channel
         let result = self.commit_batch(records)?;
@@ -85,7 +68,7 @@ pub trait Accumulator: Send + Sync {
         &self,
         root: &[u8; 32],
         key: &Key32,
-        value: &Value32,
+        value: &[u8],
         proof: Option<&Proof>,
     ) -> Result<bool>;
 

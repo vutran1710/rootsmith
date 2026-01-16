@@ -1,14 +1,14 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use std::collections::HashMap;
 
 use super::merkle_accumulator::MerkleAccumulator;
 use super::sparse_merkle_accumulator::SparseMerkleAccumulator;
 use crate::config::AccumulatorType;
-use crate::traits::accumulator::AccumulatorRecord;
-use crate::traits::accumulator::CommitmentResult;
 use crate::traits::Accumulator;
 use crate::types::Key32;
 use crate::types::Proof;
+use crate::types::RawRecord;
 use crate::types::Value32;
 
 /// Enum representing all possible accumulator implementations.
@@ -38,7 +38,7 @@ impl Accumulator for AccumulatorVariant {
         }
     }
 
-    fn commit_batch(&mut self, records: &[AccumulatorRecord]) -> Result<CommitmentResult> {
+    fn commit_batch(&mut self, records: &[RawRecord]) -> Result<(Vec<u8>, Option<HashMap<Key32, Proof>>)> {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.commit_batch(records),
             AccumulatorVariant::SparseMerkle(inner) => inner.commit_batch(records),
@@ -47,8 +47,8 @@ impl Accumulator for AccumulatorVariant {
 
     async fn commit_batch_async(
         &mut self,
-        records: &[AccumulatorRecord],
-        result_tx: tokio::sync::mpsc::UnboundedSender<CommitmentResult>,
+        records: &[RawRecord],
+        result_tx: tokio::sync::mpsc::UnboundedSender<(Vec<u8>, Option<HashMap<Key32, Proof>>)>,
     ) -> Result<()> {
         match self {
             AccumulatorVariant::Merkle(inner) => {
@@ -64,7 +64,7 @@ impl Accumulator for AccumulatorVariant {
         &self,
         root: &[u8; 32],
         key: &Key32,
-        value: &Value32,
+        value: &[u8],
         proof: Option<&Proof>,
     ) -> Result<bool> {
         match self {
