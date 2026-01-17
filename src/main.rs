@@ -6,12 +6,14 @@ mod accumulator;
 mod archiver;
 mod config;
 mod downstream;
+mod parser;
 mod rootsmith;
 mod storage;
 mod telemetry;
 mod traits;
 mod types;
 mod upstream;
+mod wasm_host;
 
 use config::BaseConfig;
 use rootsmith::RootSmith;
