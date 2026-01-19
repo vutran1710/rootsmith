@@ -2,6 +2,8 @@ use anyhow::Result;
 use wasmer::{imports, Engine, Instance, Memory, MemoryView, Module, Store, TypedFunction};
 use wasmer_compiler_cranelift::Cranelift;
 
+use crate::parser::proto::parse_proto_message;
+use crate::types::IncomingRecord;
 use crate::wasm_host::error::WasmHostError;
 use crate::wasm_host::limits::WasmLimits;
 
@@ -121,7 +123,7 @@ impl WasmPluginHost {
         Some(((v >> 16) as u16, (v & 0xFFFF) as u16))
     }
 
-    /// Process input bytes through the plugin
+    /// Process input bytes through the plugin and return raw output bytes
     ///
     /// This is the main entry point for executing the plugin:
     /// 1. Allocates memory in plugin
@@ -140,6 +142,9 @@ impl WasmPluginHost {
     ///
     /// - status = 0 → success, payload is output bytes
     /// - status = 1 → error, payload is UTF-8 error string
+    ///
+    /// # Returns
+    /// Raw payload bytes from the plugin
     ///
     /// # Errors
     /// - Returns `PluginError` if plugin returns status=1 with error message
@@ -186,6 +191,25 @@ impl WasmPluginHost {
             1 => Err(WasmHostError::PluginError(String::from_utf8_lossy(&payload).to_string()).into()),
             other => Err(WasmHostError::UnknownStatus(other).into()),
         }
+    }
+
+    /// Process input bytes through the plugin and return IncomingRecord
+    ///
+    /// This method is specifically for plugins that convert data to IncomingRecord format.
+    /// It calls `process_bytes()` internally and then parses the protobuf output.
+    ///
+    /// # Returns
+    /// Parsed `IncomingRecord` from the plugin's protobuf output
+    ///
+    /// # Errors
+    /// - Returns `PluginError` if plugin returns status=1 with error message
+    /// - Returns `PluginError` if protobuf parsing fails
+    /// - Returns `ResponseTooLarge` if response exceeds max_response_bytes
+    /// - Returns `PluginTrap` for runtime traps
+    pub fn process_to_record(&mut self, input: &[u8]) -> Result<IncomingRecord> {
+        let payload = self.process_bytes(input)?;
+        parse_proto_message(&payload)
+            .map_err(|e| WasmHostError::PluginError(format!("Failed to parse protobuf: {}", e)).into())
     }
 
     /// Get a view of plugin memory

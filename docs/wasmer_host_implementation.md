@@ -281,7 +281,70 @@ Host behavior:
 
 ---
 
-## 14. Integration Test (End‑to‑End)
+## 14. Example Plugin Implementation
+
+Here's a complete example of a plugin using the `ingestor_plugin_sdk`:
+
+```rust
+#![no_std]
+extern crate ingestor_plugin_sdk as sdk;
+
+use sdk::{plugin, DecodeFromEnvelope, Result, ToRecord};
+
+#[derive(DecodeFromEnvelope)]
+#[decode(from = "json")]
+struct MyWhateverEventName {
+    id: sdk::String,
+    ts_ms: u64,
+    user_id: sdk::String,
+    action: sdk::String,
+}
+
+impl ToRecord for MyWhateverEventName {
+    fn id(&self) -> &str { &self.id }
+    fn ts_ms(&self) -> u64 { self.ts_ms }
+
+    fn partition_key(&self) -> Option<sdk::String> {
+        Some(sdk::format!("user:{}", self.user_id))
+    }
+
+    fn attrs(&self, out: &mut dyn sdk::RecordAttrs) {
+        out.put("user_id", &self.user_id);
+        out.put("action", &self.action);
+    }
+}
+
+plugin! {
+    name: "my-plugin",
+    api_version: 1,
+    type Input = MyWhateverEventName,
+    record_kind: "my_event",
+}
+```
+
+### Key Components
+
+- **`DecodeFromEnvelope`**: Derive macro that handles decoding from the input envelope format (JSON in this case)
+- **`ToRecord`**: Trait implementation that converts the decoded event into a `Record` with:
+  - `id()`: Unique identifier for the record
+  - `ts_ms()`: Timestamp in milliseconds
+  - `partition_key()`: Optional partition key for routing
+  - `attrs()`: Additional attributes to attach to the record
+- **`plugin!` macro**: Declares the plugin metadata:
+  - `name`: Plugin identifier
+  - `api_version`: API version for compatibility checking
+  - `type Input`: The input event type
+  - `record_kind`: Type identifier for the output records
+
+This plugin will:
+1. Receive JSON-encoded envelope bytes via `process()`
+2. Decode into `MyWhateverEventName` struct
+3. Convert to a `Record` with partition key and attributes
+4. Return encoded record batch bytes
+
+---
+
+## 15. Integration Test (End‑to‑End)
 
 The host must include a real integration test that:
 
@@ -298,7 +361,7 @@ This verifies:
 
 ---
 
-## 15. Security Model Summary
+## 16. Security Model Summary
 
 This host guarantees:
 
@@ -315,7 +378,7 @@ This is acceptable for v1.
 
 ---
 
-## 16. Definition of Done
+## 17. Definition of Done
 
 The implementation is complete when:
 
@@ -327,7 +390,7 @@ The implementation is complete when:
 
 ---
 
-## 17. Next Evolution (Out of Scope)
+## 18. Next Evolution (Out of Scope)
 
 - Multiple record outputs
 - Streaming results
