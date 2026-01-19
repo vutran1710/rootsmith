@@ -1,12 +1,34 @@
+# Rust build artifacts
 /target
+**/target
 Cargo.lock
+wasm_plugin_sdk_derive/Cargo.lock
+
+# WASM files (build outputs)
+*.wasm
+
+# Database files
 *.db
+
+# Log files
 *.log
 data/
-# OS
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.flycheck*
 
 # Large artifacts (download via scripts/download-artifacts.sh)
 artifacts/*.zkey
 artifacts/*.bin
-*.wasm
+
+# Cargo local config (may contain local paths)
+.cargo/config.toml.local

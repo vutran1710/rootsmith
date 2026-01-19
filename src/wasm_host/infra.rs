@@ -157,3 +157,49 @@ pub fn store_string(s: &str) -> sdk::String {
         }
     }
 }
+
+// ================= JSON PARSING HELPERS =================
+// Helper functions for JSON parsing (used by DecodeFromEnvelope implementations)
+
+/// Extract a string field from JSON
+pub fn extract_json_string_field(input: &str, field_name: &str) -> Option<sdk::String> {
+    // Find the field pattern: "field_name":
+    let mut search_pattern = [0u8; 64];
+    search_pattern[0] = b'"';
+    let name_bytes = field_name.as_bytes();
+    if name_bytes.len() > 60 {
+        return None;
+    }
+    search_pattern[1..1 + name_bytes.len()].copy_from_slice(name_bytes);
+    search_pattern[1 + name_bytes.len()] = b'"';
+    search_pattern[2 + name_bytes.len()] = b':';
+    search_pattern[3 + name_bytes.len()] = b'"';
+    
+    let pattern_len = 4 + name_bytes.len();
+    let pattern = core::str::from_utf8(&search_pattern[..pattern_len]).ok()?;
+    let field_start = input.find(pattern)? + pattern_len;
+    let field_end = input[field_start..].find('"')?;
+    let value = &input[field_start..field_start + field_end];
+    Some(store_string(value))
+}
+
+/// Extract a u64 field from JSON
+pub fn extract_json_u64_field(input: &str, field_name: &str) -> Option<u64> {
+    // Find the field pattern: "field_name":
+    let mut search_pattern = [0u8; 64];
+    search_pattern[0] = b'"';
+    let name_bytes = field_name.as_bytes();
+    if name_bytes.len() > 60 {
+        return None;
+    }
+    search_pattern[1..1 + name_bytes.len()].copy_from_slice(name_bytes);
+    search_pattern[1 + name_bytes.len()] = b'"';
+    search_pattern[2 + name_bytes.len()] = b':';
+    
+    let pattern_len = 3 + name_bytes.len();
+    let pattern = core::str::from_utf8(&search_pattern[..pattern_len]).ok()?;
+    let value_start = input.find(pattern)? + pattern_len;
+    // Find the end of the number (comma, }, or whitespace)
+    let value_end = input[value_start..].find(|c: char| !c.is_ascii_digit()).unwrap_or(input[value_start..].len());
+    input[value_start..value_start + value_end].parse().ok()
+}

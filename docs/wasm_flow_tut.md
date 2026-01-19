@@ -2,19 +2,21 @@
 
 ## Building Client Plugin
 
-Build `tests/plugins/client.rs` to `client.wasm`:
+Build `tests/plugins/client.rs` to `client.wasm` using Cargo:
 
 ```bash
-cd src/wasm_host
-rustc --target wasm32-unknown-unknown -O --crate-type=cdylib \
-  -C link-arg=--max-memory=134217728 \
-  client_build.rs -o ../../tests/plugins/client.wasm
+cd tests/plugins
+cargo build --target wasm32-unknown-unknown --release
+cp target/wasm32-unknown-unknown/release/wasm_plugin_client.wasm client.wasm
 ```
 
 **What happens:**
-- `client_build.rs` includes infrastructure (`infra.rs`) and your plugin code (`client.rs`)
-- Compiles to WASM with 128 MiB memory limit
+- Uses `tests/plugins/Cargo.toml` which includes the `wasm_plugin_sdk_derive` proc-macro crate
+- Supports `#[derive(DecodeFromEnvelope)]` with `#[decode(from = "json")]` syntax
+- Compiles to WASM with 128 MiB memory limit (configured in `.cargo/config.toml`)
 - Output: `tests/plugins/client.wasm`
+
+**Note:** The memory limit is configured in `.cargo/config.toml` at the project root.
 
 ## Running the Test
 
@@ -33,7 +35,9 @@ cargo test test_client_plugin_converts_to_incoming_record \
 
 **Build:**
 ```bash
-cd src/wasm_host && rustc --target wasm32-unknown-unknown -O --crate-type=cdylib -C link-arg=--max-memory=134217728 client_build.rs -o ../../tests/plugins/client.wasm
+cd tests/plugins
+cargo build --target wasm32-unknown-unknown --release
+cp target/wasm32-unknown-unknown/release/wasm_plugin_client.wasm client.wasm
 ```
 
 **Test:**
@@ -43,5 +47,24 @@ cargo test test_client_plugin_converts_to_incoming_record --test load_wasm_incom
 
 **Files:**
 - `tests/plugins/client.rs` - Your plugin code (user writes this)
-- `src/wasm_host/client_build.rs` - Build wrapper (includes infrastructure)
-- `src/wasm_host/infra.rs` - Infrastructure (SDK, allocator, protobuf)
+- `tests/plugins/src/lib.rs` - Plugin entry point
+- `tests/plugins/Cargo.toml` - Cargo configuration
+- `wasm_plugin_sdk_derive/` - Proc-macro crate for `#[derive(DecodeFromEnvelope)]`
+- `src/wasm_host/infra.rs` - Infrastructure (SDK, allocator, protobuf, JSON parsing)
+
+## Writing Your Plugin
+
+Simply define your struct with `#[derive(DecodeFromEnvelope)]` and `#[decode(from = "json")]`:
+
+```rust
+#[derive(DecodeFromEnvelope)]
+#[decode(from = "json")]
+pub struct MyEvent {
+    pub id: sdk::String,
+    pub ts_ms: u64,
+    pub user_id: sdk::String,
+    pub action: sdk::String,
+}
+```
+
+The derive macro automatically generates the JSON parsing implementation!

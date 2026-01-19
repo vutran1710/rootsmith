@@ -1,50 +1,13 @@
 // ================= USER PLUGIN CODE =================
 // This is how a user would write their plugin
 
-struct MyWhateverEventName {
-    id: infra::sdk::String,
-    ts_ms: u64,
-    user_id: infra::sdk::String,
-    action: infra::sdk::String,
-}
-
-// In production, #[derive(DecodeFromEnvelope)] would generate this
-impl DecodeFromEnvelope for MyWhateverEventName {
-    fn decode_from_json(input: &[u8]) -> Option<Self> {
-        unsafe { infra::STRING_OFFSET = 0; } // Reset buffer
-        
-        let input_str = core::str::from_utf8(input).ok()?;
-        
-        // Extract id
-        let id_start = input_str.find(r#""id":"#)? + 5;
-        let id_end = input_str[id_start..].find('"')?;
-        let id_str = &input_str[id_start..id_start + id_end];
-        let id = store_string(id_str);
-        
-        // Extract ts_ms
-        let ts_start = input_str.find(r#""ts_ms":"#)? + 8;
-        let ts_end = input_str[ts_start..].find(|c: char| !c.is_ascii_digit())?;
-        let ts_ms = input_str[ts_start..ts_start + ts_end].parse().ok()?;
-        
-        // Extract user_id
-        let user_id_start = input_str.find(r#""user_id":"#)? + 10;
-        let user_id_end = input_str[user_id_start..].find('"')?;
-        let user_id_str = &input_str[user_id_start..user_id_start + user_id_end];
-        let user_id = store_string(user_id_str);
-        
-        // Extract action
-        let action_start = input_str.find(r#""action":"#)? + 9;
-        let action_end = input_str[action_start..].find('"')?;
-        let action_str = &input_str[action_start..action_start + action_end];
-        let action = store_string(action_str);
-        
-        Some(MyWhateverEventName {
-            id,
-            ts_ms,
-            user_id,
-            action,
-        })
-    }
+#[derive(DecodeFromEnvelope)]
+#[decode(from = "json")]
+pub struct MyWhateverEventName {
+    pub id: sdk::String,
+    pub ts_ms: u64,
+    pub user_id: sdk::String,
+    pub action: sdk::String,
 }
 
 impl ToRecord for MyWhateverEventName {
