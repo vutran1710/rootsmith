@@ -49,6 +49,6 @@ anyhow = "1"
 rand = "0.8"
 wat = "1"
 
-[[bench]]
-name = "prove_10k"
-harness = false
+# [[bench]]
+# name = "prove_10k"
+# harness = false

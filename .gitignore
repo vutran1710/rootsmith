@@ -9,3 +9,4 @@ data/
 # Large artifacts (download via scripts/download-artifacts.sh)
 artifacts/*.zkey
 artifacts/*.bin
+*.wasm
