@@ -32,3 +32,4 @@ artifacts/*.bin
 
 # Cargo local config (may contain local paths)
 .cargo/config.toml.local
+test_data/

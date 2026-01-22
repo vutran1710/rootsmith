@@ -11,7 +11,7 @@ pub mod infra {
 extern crate wasm_plugin_sdk_derive;
 
 use core::slice;
-use infra::sdk::{DecodeFromEnvelope, ToRecord};
+use infra::sdk::{DecodeFromEnvelope, ToRecord, ToStandardData, IncomingRecord};
 use infra::{encode_protobuf, encode_response};
 
 // Include user plugin code
@@ -21,7 +21,17 @@ mod client {
     use crate::infra::sdk;
     
     // Re-export types needed by client.rs
-    pub use crate::infra::sdk::{IncomingRecord, ToRecord};
+    pub use crate::infra::sdk::{IncomingRecord, ToRecord, ToStandardData};
+    
+    // Define SDKTrait locally for plugin-side implementation
+    // This matches the SDKTrait definition in src/accumulator/sdk_accumulator.rs
+    // When used in host context, the blanket impl will make this work with host SDKTrait
+    pub trait SDKTrait {
+        fn namespace(&self) -> [u8; 32];
+        fn key(&self) -> [u8; 32];
+        fn value(&self) -> [u8; 32];
+        fn timestamp(&self) -> u64;
+    }
     
     // Define plugin macro locally - it will be available when client.rs is included
     // This matches the definition in infra.rs
@@ -48,16 +58,28 @@ pub extern "C" fn process(ptr: *const u8, len: usize) -> *mut u8 {
 
     let input = unsafe { slice::from_raw_parts(ptr, len) };
     
-    // Decode from JSON envelope
+    // Step 1: Decode from JSON envelope
     let event = match MyWhateverEventName::decode_from_json(input) {
         Some(e) => e,
         None => return encode_response(1, b"failed to decode JSON"),
     };
     
-    // Convert to IncomingRecord
-    let record = event.to_incoming_record();
+    // Step 2: Extract metadata using ToRecord trait
+    let namespace = event.get_namespace();
+    let key = event.get_key();
+    let timestamp = event.get_timestamp();
     
-    // Encode as protobuf
+    // Step 3: Extract data using ToStandardData trait
+    let value = event.get_value();
+    
+    // Step 4: Combine metadata + data into IncomingRecord and encode as protobuf
+    let record = IncomingRecord {
+        namespace,
+        key,
+        value,
+        timestamp,
+    };
+    
     let (protobuf_ptr, protobuf_len) = encode_protobuf(&record);
     let protobuf_slice = unsafe { slice::from_raw_parts(protobuf_ptr, protobuf_len) };
     

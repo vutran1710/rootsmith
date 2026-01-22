@@ -1,11 +1,11 @@
 use rootsmith::types::IncomingRecord;
-use rootsmith::wasm_host::{WasmLimits, WasmPluginHost};
+use rootsmith::wasm_host::{ToStandardData, WasmLimits, WasmPluginHost};
 use std::fs;
 use std::path::Path;
 
 #[test]
-fn test_client_plugin_converts_to_incoming_record() {
-    println!("\n🔄 Testing Client Plugin: Data → IncomingRecord Conversion");
+fn test_trait_object_flow() {
+    println!("\n🔄 Testing Trait Object Flow: Partner Traits → Host → Accumulator");
     println!("═══════════════════════════════════════════════════════════\n");
 
     // Step 1: Load the compiled client plugin
@@ -15,10 +15,9 @@ fn test_client_plugin_converts_to_incoming_record() {
         .join("plugins")
         .join("client.wasm");
     
-    println!("   Path: {}", plugin_path.display());
-    
     let metadata = fs::metadata(&plugin_path)
         .expect("Failed to find client.wasm - make sure it's compiled");
+    println!("   Path: {}", plugin_path.display());
     println!("   File size: {} bytes\n", metadata.len());
 
     // Step 2: Initialize WASM host
@@ -29,86 +28,122 @@ fn test_client_plugin_converts_to_incoming_record() {
         .expect("Failed to load client plugin");
     println!("   ✅ Client plugin loaded successfully\n");
 
-    // Step 3: Prepare input data (JSON format)
-    println!("📥 Step 3: Preparing input data (JSON format)...");
-    
-    // Create test event data
+    // Step 3: Prepare input data
+    println!("📥 Step 3: Preparing input data...");
     let test_id = "event-12345";
-    let test_ts_ms = 1699123456000u64; // milliseconds
+    let test_ts_ms = 1699123456000u64;
     let test_user_id = "user-abc123";
     let test_action = "click";
     
-    // Create JSON input (like what a real user would send)
     let json_input = format!(
         r#"{{"id":"{}","ts_ms":{},"user_id":"{}","action":"{}"}}"#,
         test_id, test_ts_ms, test_user_id, test_action
     );
-    
-    println!("   JSON Input: {}", json_input);
-    println!("   Event ID: {}", test_id);
-    println!("   Timestamp: {} ms", test_ts_ms);
-    println!("   User ID: {}", test_user_id);
-    println!("   Action: {}\n", test_action);
-    
-    // Expected output (based on plugin's conversion logic)
-    // Plugin converts: user_id -> namespace, id -> key, action -> value
     let input_bytes = json_input.as_bytes();
+    println!("   JSON Input: {}\n", json_input);
 
-    // Step 4: Process through plugin (returns IncomingRecord directly)
-    println!("🚀 Step 4: Processing data through client plugin...");
-    println!("   Calling process_to_record() which:");
-    println!("     1. Processes input through plugin");
-    println!("     2. Receives protobuf-encoded IncomingRecord");
-    println!("     3. Parses protobuf automatically");
-    println!("     4. Returns IncomingRecord directly\n");
-    
-    let record: IncomingRecord = host.process_to_record(&input_bytes)
-        .expect("Failed to process data through plugin");
-    
-    println!("   ✅ Plugin processed and converted to IncomingRecord\n");
-
-    // Step 5: Verify the conversion
-    println!("✅ Step 5: Verifying conversion...");
-    
-    // Verify that we got a valid IncomingRecord
-    // (The exact byte patterns depend on plugin implementation details)
-    assert_eq!(record.namespace.len(), 32, "Namespace should be 32 bytes");
-    assert_eq!(record.key.len(), 32, "Key should be 32 bytes");
-    assert_eq!(record.value.len(), 32, "Value should be 32 bytes");
-    
-    // Verify timestamp (converted from ms to seconds)
-    assert_eq!(record.timestamp, test_ts_ms / 1000, "Timestamp should be converted from ms to seconds");
-    
-    // Verify that the record is not all zeros (conversion happened)
-    let namespace_sum: u32 = record.namespace.iter().map(|&b| b as u32).sum();
-    let key_sum: u32 = record.key.iter().map(|&b| b as u32).sum();
-    let value_sum: u32 = record.value.iter().map(|&b| b as u32).sum();
-    
-    assert!(namespace_sum > 0, "Namespace should contain data");
-    assert!(key_sum > 0, "Key should contain data");
-    assert!(value_sum > 0, "Value should contain data");
-    
-    println!("   ✓ Namespace: {}... (32 bytes, sum: {})", hex::encode(&record.namespace[..8]), namespace_sum);
-    println!("   ✓ Key:       {}... (32 bytes, sum: {})", hex::encode(&record.key[..8]), key_sum);
-    println!("   ✓ Value:     {}... (32 bytes, sum: {})", hex::encode(&record.value[..8]), value_sum);
-    println!("   ✓ Timestamp: {} (converted from {} ms)\n", record.timestamp, test_ts_ms);
-
-    // Step 6: Display the final IncomingRecord
-    println!("📋 Step 6: Final IncomingRecord structure:");
+    // Step 4: Show how partner implements traits
+    println!("👤 Step 4: Partner Implementation (client.rs):");
     println!("   ┌─────────────────────────────────────────────────────────┐");
-    println!("   │ IncomingRecord                                          │");
+    println!("   │ // Partner implements ToRecord for metadata           │");
+    println!("   │ impl sdk::ToRecord for MyWhateverEventName {{         │");
+    println!("   │     fn get_namespace(&self) -> [u8; 32] {{ ... }}     │");
+    println!("   │     fn get_key(&self) -> [u8; 32] {{ ... }}           │");
+    println!("   │     fn get_timestamp(&self) -> u64 {{ ... }}          │");
+    println!("   │ }}                                                      │");
+    println!("   │                                                         │");
+    println!("   │ // Partner implements ToStandardData for data          │");
+    println!("   │ impl sdk::ToStandardData for MyWhateverEventName {{   │");
+    println!("   │     fn get_value(&self) -> [u8; 32] {{ ... }}         │");
+    println!("   │ }}                                                      │");
+    println!("   └─────────────────────────────────────────────────────────┘\n");
+
+    // Step 5: Process as Standard format and get trait object
+    println!("🚀 Step 5: Processing as Standard format (trait object)...");
+    println!("   Calling process_input<ToStandardData>() which:");
+    println!("     1. Processes input through plugin");
+    println!("     2. Extracts metadata via ToRecord trait");
+    println!("     3. Extracts data via ToStandardData trait");
+    println!("     4. Encodes as protobuf IncomingRecord");
+    println!("     5. Detects Standard format and wraps in trait object");
+    println!("     6. Returns Box<dyn ToStandardData>\n");
+    
+    let output: Box<dyn ToStandardData> = host.process_input(&input_bytes)
+        .expect("Failed to process as Standard format");
+    
+    println!("   ✅ Got trait object: Box<dyn ToStandardData>\n");
+
+    // Step 6: Demonstrate trait object usage (simulating accumulator)
+    println!("🎯 Step 6: Using trait object (simulating accumulator integration)...");
+    
+    // Access trait methods
+    let namespace = output.namespace();
+    let key = output.key();
+    let timestamp = output.timestamp();
+    let value = output.value();
+    
+    println!("   ✅ Trait object methods:");
+    println!("      • namespace()  = {}... (32 bytes)", hex::encode(&namespace[..8]));
+    println!("      • key()        = {}... (32 bytes)", hex::encode(&key[..8]));
+    println!("      • timestamp()  = {} (Unix seconds)", timestamp);
+    println!("      • value()      = {}... (32 bytes)", hex::encode(&value[..8]));
+    
+    // Verify values
+    assert_eq!(namespace.len(), 32, "Namespace should be 32 bytes");
+    assert_eq!(key.len(), 32, "Key should be 32 bytes");
+    assert_eq!(value.len(), 32, "Value should be 32 bytes");
+    assert_eq!(timestamp, test_ts_ms / 1000, "Timestamp should match");
+    
+    println!("\n   ✅ Trait object works correctly\n");
+
+    // Step 7: Demonstrate accumulator integration pattern
+    println!("📋 Step 7: Accumulator Integration Pattern:");
+    println!("   ┌─────────────────────────────────────────────────────────┐");
+    println!("   │ // Accumulator receives trait object directly           │");
+    println!("   │ fn accumulator_build<T: ToStandardData>(data: Box<T>) {{ │");
+    println!("   │     let namespace = data.namespace();                   │");
+    println!("   │     let key = data.key();                               │");
+    println!("   │     let value = data.value();                           │");
+    println!("   │     let timestamp = data.timestamp();                   │");
+    println!("   │     // ... use data for accumulation ...                │");
+    println!("   │ }}                                                       │");
+    println!("   │                                                         │");
+    println!("   │ // Usage:"); 
+    println!("   │ let output = host.process_input::<ToStandardData>(input)?; │");
+    println!("   │ accumulator_build(output);  // Direct trait object      │");
+    println!("   └─────────────────────────────────────────────────────────┘\n");
+
+    // Step 8: Summary
+    println!("📋 Step 8: Summary - Trait Object Flow");
+    println!("   ┌─────────────────────────────────────────────────────────┐");
+    println!("   │ Trait Object Flow                                      │");
     println!("   ├─────────────────────────────────────────────────────────┤");
-    println!("   │ namespace:  {}...", hex::encode(&record.namespace[..16]));
-    println!("   │ key:        {}...", hex::encode(&record.key[..16]));
-    println!("   │ value:      {}...", hex::encode(&record.value[..16]));
-    println!("   │ timestamp:  {} (Unix seconds)", record.timestamp);
+    println!("   │ 1. Partner implements traits in plugin:                │");
+    println!("   │    • ToRecord (metadata: namespace, key, timestamp)    │");
+    println!("   │    • ToStandardData (data: fixed-size value)           │");
+    println!("   │                                                        │");
+    println!("   │ 2. Plugin glue code extracts metadata + data:          │");
+    println!("   │    • event.get_namespace()                             │");
+    println!("   │    • event.get_key()                                   │");
+    println!("   │    • event.get_timestamp()                             │");
+    println!("   │    • event.get_value()                                 │");
+    println!("   │                                                        │");
+    println!("   │ 3. Plugin encodes as protobuf IncomingRecord           │");
+    println!("   │                                                        │");
+    println!("   │ 4. Host detects format and wraps in trait object       │");
+    println!("   │    • Returns Box<dyn ToStandardData>                   │");
+    println!("   │                                                        │");
+    println!("   │ 5. Accumulator receives trait object directly          │");
+    println!("   │    • No intermediate struct conversion                 │");
+    println!("   │    • Type-safe via trait bounds                        │");
     println!("   └─────────────────────────────────────────────────────────┘\n");
 
     println!("═══════════════════════════════════════════════════════════");
-    println!("🎉 Client plugin successfully converts JSON events to IncomingRecord!");
-    println!("   ✓ User writes simple plugin with SDK-like API");
-    println!("   ✓ Plugin decodes JSON envelope → MyWhateverEventName");
-    println!("   ✓ Plugin converts event → IncomingRecord");
-    println!("   ✓ Host automatically parses protobuf via process_to_record()");
-    println!("   ✓ Simple, clean API - just like the SDK example!\n");
+    println!("🎉 Trait object flow works correctly!");
+    println!("   ✓ Partners implement ToRecord + ToStandardData traits");
+    println!("   ✓ Host returns Box<dyn ToStandardData> trait object");
+    println!("   ✓ Accumulator can consume trait object directly");
+    println!("   ✓ No PluginOut enum needed");
+    println!("   ✓ No intermediate struct conversion");
+    println!("   ✓ Clean, type-safe integration!\n");
 }

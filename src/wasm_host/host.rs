@@ -6,6 +6,7 @@ use crate::parser::proto::parse_proto_message;
 use crate::types::IncomingRecord;
 use crate::wasm_host::error::WasmHostError;
 use crate::wasm_host::limits::WasmLimits;
+use crate::wasm_host::wrapper::detect_and_parse;
 
 /// WASM plugin host with sandboxing and resource limits
 pub struct WasmPluginHost {
@@ -193,23 +194,22 @@ impl WasmPluginHost {
         }
     }
 
-    /// Process input bytes through the plugin and return IncomingRecord
-    ///
-    /// This method is specifically for plugins that convert data to IncomingRecord format.
-    /// It calls `process_bytes()` internally and then parses the protobuf output.
-    ///
-    /// # Returns
-    /// Parsed `IncomingRecord` from the plugin's protobuf output
-    ///
-    /// # Errors
-    /// - Returns `PluginError` if plugin returns status=1 with error message
-    /// - Returns `PluginError` if protobuf parsing fails
-    /// - Returns `ResponseTooLarge` if response exceeds max_response_bytes
-    /// - Returns `PluginTrap` for runtime traps
     pub fn process_to_record(&mut self, input: &[u8]) -> Result<IncomingRecord> {
         let payload = self.process_bytes(input)?;
         parse_proto_message(&payload)
             .map_err(|e| WasmHostError::PluginError(format!("Failed to parse protobuf: {}", e)).into())
+    }
+
+    pub fn process_input<T>(&mut self, input: &[u8]) -> Result<Box<T>>
+    where
+        T: crate::wasm_host::traits::PluginOutputTrait + ?Sized,
+    {
+        let payload = self.process_bytes(input)?;
+        let wrapper = detect_and_parse(payload)
+            .map_err(|e| WasmHostError::PluginError(format!("Failed to detect format: {}", e)))?;
+
+        T::from_wrapper(wrapper)
+            .ok_or_else(|| WasmHostError::PluginError(format!("Output is not {} format", T::format_name())).into())
     }
 
     /// Get a view of plugin memory

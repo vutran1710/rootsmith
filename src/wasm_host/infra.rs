@@ -22,8 +22,54 @@ pub mod sdk {
         fn decode_from_json(input: &[u8]) -> Option<Self> where Self: Sized;
     }
     
+    /// Trait for extracting record metadata (namespace, key, timestamp).
+    /// Partners always implement this.
     pub trait ToRecord {
-        fn to_incoming_record(&self) -> IncomingRecord;
+        /// Extract namespace (32 bytes)
+        fn get_namespace(&self) -> [u8; 32];
+        
+        /// Extract key (32 bytes)
+        fn get_key(&self) -> [u8; 32];
+        
+        /// Extract timestamp (Unix seconds)
+        fn get_timestamp(&self) -> u64;
+    }
+    
+    /// Trait for Standard format (fixed-size value).
+    /// Partners implement this when they want protobuf IncomingRecord output.
+    pub trait ToStandardData {
+        /// Extract fixed-size value (32 bytes)
+        fn get_value(&self) -> [u8; 32];
+    }
+    
+    /// Trait for Custom JSON format.
+    /// Partners implement this when they want JSON payload output.
+    pub trait ToCustomJsonData {
+        /// Extract JSON payload string
+        fn get_payload_json(&self) -> &str;
+    }
+    
+    /// Trait for Extended format (variable-length value with metadata).
+    /// Partners implement this when they want variable-length output.
+    pub trait ToExtendedData {
+        /// Extract variable-length value bytes
+        fn get_value(&self) -> &[u8];
+        
+        /// Extract optional metadata JSON string
+        fn get_metadata_json(&self) -> Option<&str>;
+    }
+    
+    /// Trait for Raw format (minimal structure).
+    /// Partners implement this when they want raw bytes output.
+    pub trait ToRawData {
+        /// Extract key (32 bytes)
+        fn get_key(&self) -> [u8; 32];
+        
+        /// Extract raw value bytes
+        fn get_raw_bytes(&self) -> &[u8];
+        
+        /// Extract optional timestamp
+        fn get_timestamp(&self) -> Option<u64>;
     }
     
     pub struct IncomingRecord {
