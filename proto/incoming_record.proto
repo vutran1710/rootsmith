@@ -5,14 +5,14 @@ package rootsmith;
 // IncomingRecord represents a data record to be ingested
 message IncomingRecord {
   // 32-byte namespace identifier
-  bytes namespace = 1;
-  
+    bytes namespace = 1;
+
   // 32-byte key
-  bytes key = 2;
-  
+    bytes key = 2;
+
   // 32-byte value
-  bytes value = 3;
-  
-  // Unix timestamp in seconds
-  uint64 timestamp = 4;
+    bytes value = 3;
+
+    // Unix timestamp in seconds
+    uint64 timestamp = 4;
 }

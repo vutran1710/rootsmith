@@ -102,6 +102,15 @@ pub struct IncomingRecord {
     pub timestamp: u64,
 }
 
+/// Unified upstream data type supporting both raw bytes and structured records.
+#[derive(Debug, Clone)]
+pub enum UpstreamData {
+    /// Raw bytes (e.g., JSON from partner)
+    Raw(Vec<u8>),
+    /// Structured IncomingRecord
+    Record(IncomingRecord),
+}
+
 /// A commitment produced by the system for a batch of leaves
 /// belonging to a single namespace and time window.
 #[derive(Debug, Clone, Serialize, Deserialize)]

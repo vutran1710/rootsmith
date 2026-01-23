@@ -11,7 +11,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::parser::proto::parse_proto_message;
 use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
+use crate::types::{IncomingRecord, UpstreamData};
 
 enum MessageHandleResult {
     Continue,
@@ -47,13 +47,13 @@ impl WebSocketSource {
     /// Handle a single WebSocket message and forward it to the channel
     async fn handle_message(
         msg: Message,
-        tx: &AsyncSender<IncomingRecord>,
+        tx: &AsyncSender<UpstreamData>,
     ) -> MessageHandleResult {
         match msg {
             Message::Binary(data) => {
                 match Self::parse_binary_message(&data) {
                     Ok(record) => {
-                        if tx.send(record).await.is_err() {
+                        if tx.send(UpstreamData::Record(record)).await.is_err() {
                             tracing::warn!("Channel closed, stopping WebSocket receiver");
                             return MessageHandleResult::Break;
                         }
@@ -87,7 +87,7 @@ impl UpstreamConnector for WebSocketSource {
         "websocket"
     }
 
-    async fn open(&mut self, tx: AsyncSender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, tx: AsyncSender<UpstreamData>) -> Result<()> {
         tracing::info!("Opening WebSocket connection: {}", self.url);
 
         // Connect to WebSocket
@@ -200,11 +200,15 @@ mod tests {
 
         let record = rx.recv().await;
         assert!(record.is_ok());
-        let record = record.unwrap();
-        assert_eq!(record.timestamp, 1234567890);
-        assert_eq!(record.namespace, [0u8; 32]);
-        assert_eq!(record.key, [1u8; 32]);
-        assert_eq!(record.value, [2u8; 32]);
+        match record.unwrap() {
+            crate::types::UpstreamData::Record(rec) => {
+                assert_eq!(rec.timestamp, 1234567890);
+                assert_eq!(rec.namespace, [0u8; 32]);
+                assert_eq!(rec.key, [1u8; 32]);
+                assert_eq!(rec.value, [2u8; 32]);
+            }
+            crate::types::UpstreamData::Raw(_) => panic!("Expected Record, got Raw"),
+        }
     }
 
     #[tokio::test]

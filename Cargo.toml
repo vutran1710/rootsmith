@@ -34,10 +34,6 @@ prost-types = "0.13"
 thiserror = "2"
 wasmer = "4"
 wasmer-compiler-cranelift = "4"
-# multiple-circuit-prover = { path = "/Users/mac/Documents/1matrix/multiple-rust-package/prover" }
-# multiple-circuit-verifier = { path = "/Users/mac/Documents/1matrix/multiple-rust-package/verifier" }
-multiple-circuit-prover = { git = "ssh://git@github.com/OneMatrixL1/multiple-rust-package.git", branch = "main" }
-multiple-circuit-verifier = { git = "ssh://git@github.com/OneMatrixL1/multiple-rust-package.git", branch = "main" }
 # optional future deps:
 # rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
 

@@ -47,6 +47,8 @@ pub enum AccumulatorType {
     Merkle,
     /// Sparse Merkle tree accumulator.
     SparseMerkle,
+    /// ZK proof service accumulator.
+    Zk,
 }
 
 impl Default for AccumulatorType {
@@ -75,8 +77,24 @@ pub struct BaseConfig {
     pub auto_commit: bool,
 
     /// Type of cryptographic accumulator backend to use.
-    #[arg(long, value_enum, default_value_t = AccumulatorType::default())]
+    #[arg(short = 'a', long = "accumulator", value_enum, default_value_t = AccumulatorType::default())]
     pub accumulator_type: AccumulatorType,
+
+    /// Path to WASM plugin file for processing partner data.
+    #[arg(long)]
+    pub wasm_plugin_path: Option<String>,
+
+    /// ZK service URL.
+    #[arg(long, default_value = "http://localhost:3000")]
+    pub zk_service_url: String,
+
+    /// ZK circuit ID.
+    #[arg(long, default_value = "v1_16_24_4")]
+    pub zk_circuit_id: String,
+
+    /// HTTP upstream bind address.
+    #[arg(long, default_value = "127.0.0.1:8000")]
+    pub upstream_bind: String,
 }
 
 impl Default for BaseConfig {
@@ -86,6 +104,10 @@ impl Default for BaseConfig {
             batch_interval_secs: 86400, // 1 day
             auto_commit: true,
             accumulator_type: AccumulatorType::default(),
+            wasm_plugin_path: None,
+            zk_service_url: "http://localhost:3000".to_string(),
+            zk_circuit_id: "v1_16_24_4".to_string(),
+            upstream_bind: "127.0.0.1:8000".to_string(),
         }
     }
 }

@@ -49,4 +49,4 @@ pub use upstream::UpstreamVariant;
 pub use wasm_host::WasmHostError;
 pub use wasm_host::WasmLimits;
 pub use wasm_host::WasmPluginHost;
-pub use zk_service::{ZkAccumulator, ZKTrait};
+pub use accumulator::{ZkAccumulator, ZKTrait};

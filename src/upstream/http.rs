@@ -20,7 +20,7 @@ use tracing::info;
 use tracing::warn;
 
 use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
+use crate::types::{IncomingRecord, UpstreamData};
 
 /// HTTP upstream connector that runs an HTTP server to receive IncomingRecords.
 ///
@@ -63,8 +63,8 @@ pub struct HttpSource {
     socket_addr: SocketAddr,
     /// Actual bound address (set after server starts)
     actual_addr: Arc<Mutex<Option<SocketAddr>>>,
-    /// Channel sender for forwarding records
-    tx: Arc<Mutex<Option<AsyncSender<IncomingRecord>>>>,
+    /// Channel sender for forwarding data
+    tx: Arc<Mutex<Option<AsyncSender<UpstreamData>>>>,
     /// Server shutdown signal
     shutdown_tx: Arc<Mutex<Option<tokio::sync::oneshot::Sender<()>>>>,
 }
@@ -93,7 +93,7 @@ impl HttpSource {
     /// Handle incoming HTTP requests.
     async fn handle_request(
         req: Request<Body>,
-        tx: Arc<Mutex<Option<AsyncSender<IncomingRecord>>>>,
+        tx: Arc<Mutex<Option<AsyncSender<UpstreamData>>>>,
     ) -> Result<Response<Body>, Infallible> {
         let method = req.method();
         let path = req.uri().path();
@@ -107,7 +107,10 @@ impl HttpSource {
                 .body(Body::from(r#"{"status":"ok"}"#))
                 .unwrap()),
 
-            // Single record ingestion
+            // Raw JSON ingestion (for partner data)
+            (&Method::POST, "/ingest/raw") => Self::handle_ingest_raw(req, tx).await,
+
+            // Single record ingestion (backward compatibility)
             (&Method::POST, "/ingest") => Self::handle_ingest_single(req, tx).await,
 
             // Batch record ingestion
@@ -121,10 +124,56 @@ impl HttpSource {
         }
     }
 
-    /// Handle single record ingestion.
+    /// Handle raw JSON ingestion (for partner data).
+    async fn handle_ingest_raw(
+        req: Request<Body>,
+        tx: Arc<Mutex<Option<AsyncSender<UpstreamData>>>>,
+    ) -> Result<Response<Body>, Infallible> {
+        let whole_body = match hyper::body::to_bytes(req.into_body()).await {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                error!("Failed to read request body: {}", e);
+                return Ok(Response::builder()
+                    .status(StatusCode::BAD_REQUEST)
+                    .body(Body::from(format!(
+                        r#"{{"error":"invalid_body","message":"{}"}}"#,
+                        e
+                    )))
+                    .unwrap());
+            }
+        };
+
+        let tx_guard = tx.lock().await;
+        if let Some(sender) = tx_guard.as_ref() {
+            match sender.send(UpstreamData::Raw(whole_body.to_vec())).await {
+                Ok(_) => {
+                    debug!("Successfully ingested raw JSON");
+                    Ok(Response::builder()
+                        .status(StatusCode::OK)
+                        .body(Body::from(r#"{"status":"ok","ingested":1}"#))
+                        .unwrap())
+                }
+                Err(e) => {
+                    error!("Failed to send raw data to channel: {}", e);
+                    Ok(Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from(r#"{"error":"channel_error"}"#))
+                        .unwrap())
+                }
+            }
+        } else {
+            error!("Channel sender not initialized");
+            Ok(Response::builder()
+                .status(StatusCode::INTERNAL_SERVER_ERROR)
+                .body(Body::from(r#"{"error":"not_initialized"}"#))
+                .unwrap())
+        }
+    }
+
+    /// Handle single record ingestion (backward compatibility).
     async fn handle_ingest_single(
         req: Request<Body>,
-        tx: Arc<Mutex<Option<AsyncSender<IncomingRecord>>>>,
+        tx: Arc<Mutex<Option<AsyncSender<UpstreamData>>>>,
     ) -> Result<Response<Body>, Infallible> {
         // Read request body
         let whole_body = match hyper::body::to_bytes(req.into_body()).await {
@@ -159,7 +208,7 @@ impl HttpSource {
         // Send to channel
         let tx_guard = tx.lock().await;
         if let Some(sender) = tx_guard.as_ref() {
-            match sender.send(record).await {
+            match sender.send(UpstreamData::Record(record)).await {
                 Ok(_) => {
                     debug!("Successfully ingested single record");
                     Ok(Response::builder()
@@ -187,7 +236,7 @@ impl HttpSource {
     /// Handle batch record ingestion.
     async fn handle_ingest_batch(
         req: Request<Body>,
-        tx: Arc<Mutex<Option<AsyncSender<IncomingRecord>>>>,
+        tx: Arc<Mutex<Option<AsyncSender<UpstreamData>>>>,
     ) -> Result<Response<Body>, Infallible> {
         // Read request body
         let whole_body = match hyper::body::to_bytes(req.into_body()).await {
@@ -226,7 +275,7 @@ impl HttpSource {
         if let Some(sender) = tx_guard.as_ref() {
             let mut success_count = 0;
             for record in records {
-                match sender.send(record).await {
+                match sender.send(UpstreamData::Record(record)).await {
                     Ok(_) => success_count += 1,
                     Err(e) => {
                         error!("Failed to send record to channel: {}", e);
@@ -273,7 +322,7 @@ impl UpstreamConnector for HttpSource {
         "http-source"
     }
 
-    async fn open(&mut self, tx: AsyncSender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, tx: AsyncSender<UpstreamData>) -> Result<()> {
         info!("Starting HTTP server on {}", self.bind_addr);
 
         // Store the channel sender
@@ -449,10 +498,15 @@ mod tests {
 
         // Verify record was received
         let received = rx.recv().await.unwrap();
-        assert_eq!(received.namespace, record.namespace);
-        assert_eq!(received.key, record.key);
-        assert_eq!(received.value, record.value);
-        assert_eq!(received.timestamp, record.timestamp);
+        match received {
+            UpstreamData::Record(rec) => {
+                assert_eq!(rec.namespace, record.namespace);
+                assert_eq!(rec.key, record.key);
+                assert_eq!(rec.value, record.value);
+                assert_eq!(rec.timestamp, record.timestamp);
+            }
+            UpstreamData::Raw(_) => panic!("Expected Record, got Raw"),
+        }
 
         source.close().await.unwrap();
     }
@@ -507,8 +561,13 @@ mod tests {
         let received1 = rx.recv().await.unwrap();
         let received2 = rx.recv().await.unwrap();
 
-        assert_eq!(received1.key, [2u8; 32]);
-        assert_eq!(received2.key, [4u8; 32]);
+        match (received1, received2) {
+            (UpstreamData::Record(r1), UpstreamData::Record(r2)) => {
+                assert_eq!(r1.key, [2u8; 32]);
+                assert_eq!(r2.key, [4u8; 32]);
+            }
+            _ => panic!("Expected Records, got something else"),
+        }
 
         source.close().await.unwrap();
     }

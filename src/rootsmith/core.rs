@@ -6,37 +6,21 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
-use tracing::info;
 
 use crate::archiver::ArchiveStorageVariant;
 use crate::config::BaseConfig;
 use crate::downstream::DownstreamVariant;
 use crate::storage::Storage;
-use crate::types::Namespace;
+use crate::types::{Namespace, RawRecord};
 use crate::types::Value32;
 use crate::upstream::UpstreamVariant;
 use crate::wasm_host::{WasmPluginHost, ToStandardData};
+use crate::types::{CommitmentResult, UpstreamData};
+use crate::traits::{UpstreamConnector, Downstream, Accumulator};
+use crate::accumulator::AccumulatorVariant;
 use kanal::AsyncSender;
-use crate::types::CommitmentResult;
-use async_trait::async_trait;
-
-/// Trait for ZK accumulator to avoid circular dependencies
-#[async_trait]
-pub(crate) trait ZkAccumulatorTrait: Send + Sync {
-    async fn commit_trait(
-        &mut self,
-        records: &[Box<dyn ZKTraitData>],
-        result_tx: AsyncSender<CommitmentResult>,
-    ) -> Result<()>;
-}
-
-/// Trait for ZK data to avoid importing ZKTrait directly
-pub(crate) trait ZKTraitData: Send + Sync {
-    fn namespace(&self) -> [u8; 32];
-    fn key(&self) -> [u8; 32];
-    fn value(&self) -> [u8; 32];
-    fn timestamp(&self) -> u64;
-}
+use kanal::unbounded_async;
+use tracing::{error, info, warn};
 
 /// Epoch phase for the commit cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -85,8 +69,8 @@ pub struct RootSmith {
     /// WASM plugin host for processing partner data.
     pub wasm_host: Option<Arc<tokio::sync::Mutex<WasmPluginHost>>>,
 
-    /// ZK accumulator for sending data to ZK service.
-    zk_accumulator: Option<Arc<tokio::sync::Mutex<Box<dyn ZkAccumulatorTrait>>>>,
+    /// Accumulator for processing records (Merkle, SparseMerkle, or ZK).
+    accumulator: Option<Arc<tokio::sync::Mutex<AccumulatorVariant>>>,
 }
 
 impl RootSmith {
@@ -113,7 +97,7 @@ impl RootSmith {
             active_namespaces: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             committed_records: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             wasm_host: None,
-            zk_accumulator: None,
+            accumulator: None,
         }
     }
 
@@ -146,10 +130,11 @@ impl RootSmith {
         self
     }
 
-    pub fn with_zk_accumulator(mut self, zk_accumulator: impl ZkAccumulatorTrait + 'static) -> Self {
-        self.zk_accumulator = Some(Arc::new(tokio::sync::Mutex::new(Box::new(zk_accumulator))));
+    pub fn with_accumulator(mut self, accumulator: AccumulatorVariant) -> Self {
+        self.accumulator = Some(Arc::new(tokio::sync::Mutex::new(accumulator)));
         self
     }
+
 
     pub async fn process_partner_data_to_zk(
         &self,
@@ -158,45 +143,77 @@ impl RootSmith {
     ) -> Result<()> {
         let wasm_host = self.wasm_host.as_ref()
             .ok_or_else(|| anyhow::anyhow!("WASM host not configured"))?;
-        let zk_accumulator = self.zk_accumulator.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("ZK accumulator not configured"))?;
+        let accumulator = self.accumulator.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Accumulator not configured"))?;
 
         let mut host_guard = wasm_host.lock().await;
         let output: Box<dyn ToStandardData> = host_guard.process_input(partner_data)?;
 
-        let namespace = output.namespace();
         let key = output.key();
         let value = output.value();
-        let timestamp = output.timestamp();
 
         drop(host_guard);
 
-        struct ZKDataWrapper {
-            namespace: [u8; 32],
-            key: [u8; 32],
-            value: [u8; 32],
-            timestamp: u64,
-        }
-
-        impl ZKTraitData for ZKDataWrapper {
-            fn namespace(&self) -> [u8; 32] { self.namespace }
-            fn key(&self) -> [u8; 32] { self.key }
-            fn value(&self) -> [u8; 32] { self.value }
-            fn timestamp(&self) -> u64 { self.timestamp }
-        }
-
-        let zk_data = ZKDataWrapper {
-            namespace,
+        let raw_record = RawRecord {
             key,
-            value,
-            timestamp,
+            value: value.to_vec(),
         };
 
-        let trait_objects: Vec<Box<dyn ZKTraitData>> = vec![Box::new(zk_data)];
+        let mut acc_guard = accumulator.lock().await;
+        acc_guard.commit(&[raw_record], result_tx).await?;
 
-        let mut zk_guard = zk_accumulator.lock().await;
-        zk_guard.commit_trait(&trait_objects, result_tx).await?;
+        Ok(())
+    }
 
+    pub async fn run(&mut self) -> Result<()> {
+        let (tx, rx) = unbounded_async();
+
+        info!("Opening upstream connector: {}", self.upstream.name());
+        self.upstream.open(tx).await?;
+
+        info!("RootSmith run loop started");
+        info!("Waiting for incoming data...");
+
+        while let Ok(data) = rx.recv().await {
+            match data {
+                UpstreamData::Raw(raw_bytes) => {
+                    info!("Received raw data ({} bytes)", raw_bytes.len());
+                    
+                    let (result_tx, result_rx) = unbounded_async();
+                    
+                    match self.process_partner_data_to_zk(&raw_bytes, result_tx).await {
+                        Ok(_) => {
+                            info!("Data processed through WASM → ZK accumulator");
+                            
+                            match result_rx.recv().await {
+                                Ok(result) => {
+                                    info!("Commitment result received");
+                                    info!("  Commitment: {} bytes", result.commitment.len());
+                                    info!("  Committed at: {}", result.committed_at);
+                                    
+                                    if let Err(e) = self.downstream.handle(&result).await {
+                                        error!("Failed to send result to downstream: {}", e);
+                                    } else {
+                                        info!("Result sent to downstream: {}", self.downstream.name());
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to receive commitment result: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to process data: {}", e);
+                        }
+                    }
+                }
+                UpstreamData::Record(record) => {
+                    warn!("Received IncomingRecord format - not processing (use /ingest/raw for partner data)");
+                }
+            }
+        }
+
+        info!("RootSmith run loop ended");
         Ok(())
     }
 }

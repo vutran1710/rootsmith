@@ -1,10 +1,10 @@
 use rootsmith::wasm_host::{WasmLimits, WasmPluginHost};
-use rootsmith::zk_service::ZkAccumulator;
+use rootsmith::accumulator::AccumulatorVariant;
 use rootsmith::rootsmith::RootSmith;
 use rootsmith::upstream::UpstreamVariant;
 use rootsmith::downstream::DownstreamVariant;
 use rootsmith::archiver::ArchiveStorageVariant;
-use rootsmith::config::BaseConfig;
+use rootsmith::config::{BaseConfig, AccumulatorType};
 use rootsmith::storage::Storage;
 use std::path::Path;
 use kanal::unbounded_async;
@@ -35,14 +35,14 @@ async fn test_rootsmith_flow_partner_to_zk_service() {
         .expect("Failed to load client plugin");
     println!("✅ WASM Plugin loaded: {}", plugin_path_str);
 
-    let zk_accumulator = ZkAccumulator::new(
-        "http://localhost:3000",
-        "v1_16_24_4",
-    );
-    println!("✅ ZK Accumulator initialized (http://localhost:3000, circuit: v1_16_24_4)");
-
     let storage = Storage::open("./test_data").expect("Failed to open storage");
-    let config = BaseConfig::default();
+    let mut config = BaseConfig::default();
+    config.zk_service_url = "http://localhost:3000".to_string();
+    config.zk_circuit_id = "v1_16_24_4".to_string();
+    config.accumulator_type = AccumulatorType::Zk;
+    
+    let accumulator = AccumulatorVariant::new(AccumulatorType::Zk, &config);
+    println!("✅ ZK Accumulator initialized (http://localhost:3000, circuit: v1_16_24_4)");
     
     let rootsmith = RootSmith::new(
         UpstreamVariant::Noop(rootsmith::upstream::NoopUpstream),
@@ -52,7 +52,7 @@ async fn test_rootsmith_flow_partner_to_zk_service() {
         storage,
     )
     .with_wasm_host(wasm_host)
-    .with_zk_accumulator(zk_accumulator);
+    .with_accumulator(accumulator);
     
     println!("✅ RootSmith initialized\n");
 
@@ -92,7 +92,8 @@ async fn test_rootsmith_flow_partner_to_zk_service() {
     println!("Step 3: RootSmith Processes Data (WASM → ZK Accumulator → ZK Service)");
     println!("─────────────────────────────────────────────────────────");
     
-    use rootsmith::zk_service::{ZkServiceClient, ZKTrait, SubmitJobRequest, InputData, Operator, DataSelection, SelectionCount};
+    use rootsmith::zk_service::{ZkServiceClient, SubmitJobRequest, InputData, Operator, DataSelection, SelectionCount};
+    use rootsmith::accumulator::ZKTrait;
     use rootsmith::wasm_host::ToStandardData;
     
     let zk_client = ZkServiceClient::new("http://localhost:3000");

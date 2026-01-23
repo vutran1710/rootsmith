@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use kanal::AsyncSender;
 
 use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
+use crate::types::UpstreamData;
 
 /// Noop upstream connector for demonstration purposes.
 pub struct NoopUpstream;
@@ -14,7 +14,7 @@ impl UpstreamConnector for NoopUpstream {
         "noop-upstream"
     }
 
-    async fn open(&mut self, _tx: AsyncSender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, _tx: AsyncSender<UpstreamData>) -> Result<()> {
         tracing::info!("NoopUpstream: open() called - no data to send");
         Ok(())
     }

@@ -3,6 +3,8 @@ use super::types::*;
 use reqwest::Client;
 use std::time::Duration;
 use uuid::Uuid;
+use tracing;
+use hex;
 
 /// ZK Service HTTP client
 #[derive(Debug, Clone)]
@@ -70,6 +72,30 @@ impl ZkServiceClient {
         
         let url = format!("{}/job/submit", self.base_url);
         
+        tracing::info!("ZK Service Request:");
+        tracing::info!("  URL: {}", url);
+        tracing::info!("  Circuit ID: {}", request.circuit_id);
+        tracing::info!("  Operators: {:?}", request.operators);
+        tracing::info!("  Data Type: {}", data_type);
+        match &data {
+            serde_json::Value::Array(rows) => {
+                tracing::info!("  Data: {} rows", rows.len());
+                for (idx, row) in rows.iter().enumerate() {
+                    if let Some(bytes) = row.as_array() {
+                        let byte_vec: Vec<u8> = bytes.iter()
+                            .filter_map(|v| v.as_u64().map(|n| n as u8))
+                            .collect();
+                        tracing::info!("    Row {}: {} bytes - {}", idx, byte_vec.len(), hex::encode(&byte_vec));
+                    }
+                }
+            }
+            _ => {
+                tracing::info!("  Data: {}", serde_json::to_string(&data).unwrap_or_else(|_| "failed to serialize".to_string()));
+            }
+        }
+        tracing::info!("  Webhook URL: {}", request.webhook_url);
+        tracing::info!("  Full Request Body: {}", serde_json::to_string_pretty(&body).unwrap_or_else(|_| "failed to serialize".to_string()));
+        
         let response = self.client
             .post(&url)
             .json(&body)
@@ -90,21 +116,42 @@ impl ZkServiceClient {
     pub async fn submit_job_multipart(&self, request: SubmitJobRequest) -> Result<SubmitJobResponse> {
         use reqwest::multipart;
         
+        tracing::info!("ZK Service Request (Multipart):");
+        tracing::info!("  URL: {}/job/submit", self.base_url);
+        tracing::info!("  Circuit ID: {}", request.circuit_id);
+        tracing::info!("  Operators: {:?}", request.operators);
+        
         // Serialize operators to JSON string
         let operators_json = serde_json::to_string(&request.operators)?;
         
         // Build multipart form
         let mut form = multipart::Form::new()
-            .text("circuit_id", request.circuit_id)
-            .text("webhook_url", request.webhook_url)
-            .text("operators", operators_json);
+            .text("circuit_id", request.circuit_id.clone())
+            .text("webhook_url", request.webhook_url.clone())
+            .text("operators", operators_json.clone());
         
         // Add data fields based on type
+        match &request.data {
+            InputData::RawBytes(rows) => {
+                tracing::info!("  Data Type: raw_bytes");
+                tracing::info!("  Data: {} rows", rows.len());
+                for (index, row) in rows.iter().enumerate() {
+                    tracing::info!("    Row {}: {} bytes - {}", index, row.len(), hex::encode(row));
+                }
+            }
+            InputData::Table { columns, column_order } => {
+                tracing::info!("  Data Type: table");
+                tracing::info!("  Columns: {} ({:?})", column_order.len(), column_order);
+            }
+        }
+        
         match request.data {
             InputData::RawBytes(rows) => {
                 for (index, row) in rows.into_iter().enumerate() {
+                    let field_name = format!("data[{}]", index);
+                    tracing::info!("  Adding form part: {} ({} bytes) - {}", field_name, row.len(), hex::encode(&row));
                     form = form.part(
-                        format!("data[{}]", index),
+                        field_name,
                         multipart::Part::bytes(row),
                     );
                 }
@@ -138,6 +185,8 @@ impl ZkServiceClient {
         }
         
         let url = format!("{}/job/submit", self.base_url);
+        tracing::info!("  Webhook URL: {}", request.webhook_url);
+        tracing::info!("  Sending multipart form");
         
         let response = self.client
             .post(&url)

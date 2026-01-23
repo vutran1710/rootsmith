@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  rootsmith:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev
+    container_name: rootsmith-dev
+    ports:
+      - "8000:8000"
+    environment:
+      - RUST_LOG=info
+      - RUST_BACKTRACE=1
+    volumes:
+      - ./data:/app/data
+      - ./tests:/app/tests
+    command: >
+      rootsmith
+      --wasm-plugin-path tests/plugins/client.wasm
+      --zk-service-url http://host.docker.internal:3000
+      --upstream-bind 0.0.0.0:8000
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
