@@ -6,15 +6,21 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
-use tracing::info;
 
 use crate::archiver::ArchiveStorageVariant;
 use crate::config::BaseConfig;
 use crate::downstream::DownstreamVariant;
 use crate::storage::Storage;
-use crate::types::Namespace;
+use crate::types::{Namespace, RawRecord};
 use crate::types::Value32;
 use crate::upstream::UpstreamVariant;
+use crate::wasm_host::{WasmPluginHost, ToStandardData};
+use crate::types::{CommitmentResult, UpstreamData};
+use crate::traits::{UpstreamConnector, Downstream, Accumulator};
+use crate::accumulator::AccumulatorVariant;
+use kanal::AsyncSender;
+use kanal::unbounded_async;
+use tracing::{error, info, warn};
 
 /// Epoch phase for the commit cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +65,12 @@ pub struct RootSmith {
 
     /// Track committed records for pruning in pending phase.
     pub committed_records: Arc<tokio::sync::Mutex<Vec<CommittedRecord>>>,
+
+    /// WASM plugin host for processing partner data.
+    pub wasm_host: Option<Arc<tokio::sync::Mutex<WasmPluginHost>>>,
+
+    /// Accumulator for processing records (Merkle, SparseMerkle, or ZK).
+    accumulator: Option<Arc<tokio::sync::Mutex<AccumulatorVariant>>>,
 }
 
 impl RootSmith {
@@ -84,6 +96,8 @@ impl RootSmith {
             epoch_start_ts: Arc::new(tokio::sync::Mutex::new(now)),
             active_namespaces: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             committed_records: Arc::new(tokio::sync::Mutex::new(Vec::new())),
+            wasm_host: None,
+            accumulator: None,
         }
     }
 
@@ -109,5 +123,97 @@ impl RootSmith {
             config,
             storage,
         ))
+    }
+
+    pub fn with_wasm_host(mut self, wasm_host: WasmPluginHost) -> Self {
+        self.wasm_host = Some(Arc::new(tokio::sync::Mutex::new(wasm_host)));
+        self
+    }
+
+    pub fn with_accumulator(mut self, accumulator: AccumulatorVariant) -> Self {
+        self.accumulator = Some(Arc::new(tokio::sync::Mutex::new(accumulator)));
+        self
+    }
+
+
+    pub async fn process_partner_data_to_zk(
+        &self,
+        partner_data: &[u8],
+        result_tx: AsyncSender<CommitmentResult>,
+    ) -> Result<()> {
+        let wasm_host = self.wasm_host.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("WASM host not configured"))?;
+        let accumulator = self.accumulator.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Accumulator not configured"))?;
+
+        let mut host_guard = wasm_host.lock().await;
+        let output: Box<dyn ToStandardData> = host_guard.process_input(partner_data)?;
+
+        let key = output.key();
+        let value = output.value();
+
+        drop(host_guard);
+
+        let raw_record = RawRecord {
+            key,
+            value: value.to_vec(),
+        };
+
+        let mut acc_guard = accumulator.lock().await;
+        acc_guard.commit(&[raw_record], result_tx).await?;
+
+        Ok(())
+    }
+
+    pub async fn run(&mut self) -> Result<()> {
+        let (tx, rx) = unbounded_async();
+
+        info!("Opening upstream connector: {}", self.upstream.name());
+        self.upstream.open(tx).await?;
+
+        info!("RootSmith run loop started");
+        info!("Waiting for incoming data...");
+
+        while let Ok(data) = rx.recv().await {
+            match data {
+                UpstreamData::Raw(raw_bytes) => {
+                    info!("Received raw data ({} bytes)", raw_bytes.len());
+                    
+                    let (result_tx, result_rx) = unbounded_async();
+                    
+                    match self.process_partner_data_to_zk(&raw_bytes, result_tx).await {
+                        Ok(_) => {
+                            info!("Data processed through WASM → ZK accumulator");
+                            
+                            match result_rx.recv().await {
+                                Ok(result) => {
+                                    info!("Commitment result received");
+                                    info!("  Commitment: {} bytes", result.commitment.len());
+                                    info!("  Committed at: {}", result.committed_at);
+                                    
+                                    if let Err(e) = self.downstream.handle(&result).await {
+                                        error!("Failed to send result to downstream: {}", e);
+                                    } else {
+                                        info!("Result sent to downstream: {}", self.downstream.name());
+                                    }
+                                }
+                                Err(e) => {
+                                    error!("Failed to receive commitment result: {}", e);
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to process data: {}", e);
+                        }
+                    }
+                }
+                UpstreamData::Record(record) => {
+                    warn!("Received IncomingRecord format - not processing (use /ingest/raw for partner data)");
+                }
+            }
+        }
+
+        info!("RootSmith run loop ended");
+        Ok(())
     }
 }

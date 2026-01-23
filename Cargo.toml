@@ -12,7 +12,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rocksdb = "0.22"
 kanal = "0.1.0-pre8"
-uuid = { version = "1", features = ["v4"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+chrono = { version = "0.4", features = ["serde"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
 opentelemetry = { version = "0.24", features = ["trace"] }
@@ -29,15 +31,22 @@ sha2 = "0.10"
 blake3 = "1"
 prost = "0.13"
 prost-types = "0.13"
-# multiple-circuit-prover = { path = "/Users/mac/Documents/1matrix/multiple-rust-package/prover" }
-# multiple-circuit-verifier = { path = "/Users/mac/Documents/1matrix/multiple-rust-package/verifier" }
-multiple-circuit-prover = { git = "ssh://git@github.com/OneMatrixL1/multiple-rust-package.git", branch = "main" }
-multiple-circuit-verifier = { git = "ssh://git@github.com/OneMatrixL1/multiple-rust-package.git", branch = "main" }
+thiserror = "2"
+wasmer = "4"
+wasmer-compiler-cranelift = "4"
 # optional future deps:
 # rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
+
+[build-dependencies]
+prost-build = "0.13"
 
 [dev-dependencies]
 tempfile = "3"
 criterion = "0.5"
 anyhow = "1"
 rand = "0.8"
+wat = "1"
+
+# [[bench]]
+# name = "prove_10k"
+# harness = false

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use kanal::unbounded_async;
 use rootsmith::accumulator::AccumulatorVariant;
-use rootsmith::config::AccumulatorType;
+use rootsmith::config::{AccumulatorType, BaseConfig};
 use rootsmith::types::RawRecord;
 use rootsmith::Accumulator;
 
@@ -19,7 +19,8 @@ fn test_value(id: u8) -> Vec<u8> {
 async fn test_merkle_accumulator_commit() -> Result<()> {
     println!("\n=== Test: Merkle Accumulator Commit ===\n");
 
-    let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle);
+    let config = BaseConfig::default();
+    let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle, &config);
 
     // Create test records
     let records: Vec<RawRecord> = (0..5)
@@ -71,7 +72,8 @@ async fn test_merkle_accumulator_commit() -> Result<()> {
 async fn test_sparse_merkle_accumulator_commit() -> Result<()> {
     println!("\n=== Test: Sparse Merkle Accumulator Commit ===\n");
 
-    let mut accumulator = AccumulatorVariant::new(AccumulatorType::SparseMerkle);
+    let config = BaseConfig::default();
+    let mut accumulator = AccumulatorVariant::new(AccumulatorType::SparseMerkle, &config);
 
     // Create test records
     let records: Vec<RawRecord> = (0..5)
@@ -123,7 +125,8 @@ async fn test_sparse_merkle_accumulator_commit() -> Result<()> {
 async fn test_empty_batch() -> Result<()> {
     println!("\n=== Test: Empty Batch Commit ===\n");
 
-    let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle);
+    let config = BaseConfig::default();
+    let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle, &config);
 
     // Empty records
     let records: Vec<RawRecord> = vec![];
@@ -159,7 +162,8 @@ async fn test_empty_batch() -> Result<()> {
 async fn test_multiple_batches() -> Result<()> {
     println!("\n=== Test: Multiple Sequential Batches ===\n");
 
-    let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle);
+    let config = BaseConfig::default();
+    let mut accumulator = AccumulatorVariant::new(AccumulatorType::Merkle, &config);
 
     // First batch
     let records1: Vec<RawRecord> = (0..3)

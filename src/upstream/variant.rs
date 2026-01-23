@@ -8,7 +8,7 @@ use super::noop::NoopUpstream;
 use super::websocket::WebSocketSource;
 use crate::config::UpstreamType;
 use crate::traits::UpstreamConnector;
-use crate::types::IncomingRecord;
+use crate::types::UpstreamData;
 
 /// Enum representing all possible upstream connector implementations.
 pub enum UpstreamVariant {
@@ -45,7 +45,7 @@ impl UpstreamConnector for UpstreamVariant {
         }
     }
 
-    async fn open(&mut self, tx: AsyncSender<IncomingRecord>) -> Result<()> {
+    async fn open(&mut self, tx: AsyncSender<UpstreamData>) -> Result<()> {
         match self {
             UpstreamVariant::Http(inner) => inner.open(tx).await,
             UpstreamVariant::WebSocket(inner) => inner.open(tx).await,
