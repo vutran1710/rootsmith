@@ -1,0 +1,12 @@
+[package]
+name = "wasm_plugin_sdk_derive"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full", "parsing"] }
+quote = "1.0"
+proc-macro2 = "1.0"

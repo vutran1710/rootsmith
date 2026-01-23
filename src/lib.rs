@@ -4,12 +4,15 @@ pub mod accumulator;
 pub mod archiver;
 pub mod config;
 pub mod downstream;
+pub mod parser;
 pub mod rootsmith;
 pub mod storage;
 pub mod telemetry;
 pub mod traits;
 pub mod types;
 pub mod upstream;
+pub mod wasm_host;
+pub mod zk_service;
 
 // Re-export commonly used types and traits
 // Re-export variant enums for convenience
@@ -43,3 +46,7 @@ pub use types::Namespace;
 pub use types::RawRecord;
 pub use types::StoredProof;
 pub use upstream::UpstreamVariant;
+pub use wasm_host::WasmHostError;
+pub use wasm_host::WasmLimits;
+pub use wasm_host::WasmPluginHost;
+pub use accumulator::{ZkAccumulator, ZKTrait};
