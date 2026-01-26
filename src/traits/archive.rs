@@ -1,27 +1,15 @@
 use anyhow::Result;
+use arrow::array::RecordBatch;
 use async_trait::async_trait;
-use serde::Deserialize;
-use serde::Serialize;
 
-use crate::types::BatchCommitmentMeta;
-use crate::types::IncomingRecord;
-use crate::types::StoredProof;
+use crate::types::Namespace;
 
 /// Types of data that can be archived.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub enum ArchiveData {
-    /// Commitment metadata.
-    Commitment(BatchCommitmentMeta),
-    /// Proof.
-    Proof(StoredProof),
-    /// Raw incoming record.
-    Record(IncomingRecord),
-    /// Batch of commitments.
-    CommitmentBatch(Vec<BatchCommitmentMeta>),
-    /// Batch of proofs.
-    ProofBatch(Vec<StoredProof>),
-    /// Batch of records.
-    RecordBatch(Vec<IncomingRecord>),
+    Json(serde_json::Value),
+    Binary(Vec<u8>),
+    Arrow(RecordBatch),
 }
 
 #[async_trait]
@@ -30,7 +18,7 @@ pub trait ArchiveStorage: Send + Sync {
     fn name(&self) -> &'static str;
 
     /// Archive a single data item.
-    async fn archive(&self, data: &ArchiveData) -> Result<String>;
+    async fn archive(&self, ns: Namespace, timestamp: u64, data: ArchiveData) -> Result<String>;
 
     /// Initialize the archive storage (e.g., create buckets, directories).
     async fn open(&self) -> Result<()>;

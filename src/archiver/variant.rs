@@ -21,10 +21,15 @@ impl ArchiveStorage for ArchiveStorageVariant {
         }
     }
 
-    async fn archive(&self, data: &ArchiveData) -> Result<String> {
+    async fn archive(
+        &self,
+        ns: crate::types::Namespace,
+        timestamp: u64,
+        data: ArchiveData,
+    ) -> Result<String> {
         match self {
-            ArchiveStorageVariant::S3Glacier(inner) => inner.archive(data).await,
-            ArchiveStorageVariant::File(inner) => inner.archive(data).await,
+            ArchiveStorageVariant::S3Glacier(inner) => inner.archive(ns, timestamp, data).await,
+            ArchiveStorageVariant::File(inner) => inner.archive(ns, timestamp, data).await,
         }
     }
 
