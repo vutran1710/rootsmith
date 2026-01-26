@@ -17,8 +17,9 @@ pub mod zk_service;
 // Re-export commonly used types and traits
 // Re-export variant enums for convenience
 pub use accumulator::AccumulatorVariant;
+pub use accumulator::ZKTrait;
+pub use accumulator::ZkAccumulator;
 pub use archiver::ArchiveStorageVariant;
-pub use archiver::MockArchive;
 pub use config::AccumulatorType;
 pub use config::BaseConfig;
 pub use config::DownstreamType;
@@ -30,7 +31,6 @@ pub use rootsmith::RootSmith;
 pub use storage::Storage;
 pub use traits::Accumulator;
 pub use traits::ArchiveData;
-pub use traits::ArchiveFilter;
 pub use traits::ArchiveStorage;
 pub use traits::Downstream;
 pub use traits::UpstreamConnector;
@@ -49,4 +49,3 @@ pub use upstream::UpstreamVariant;
 pub use wasm_host::WasmHostError;
 pub use wasm_host::WasmLimits;
 pub use wasm_host::WasmPluginHost;
-pub use accumulator::{ZkAccumulator, ZKTrait};

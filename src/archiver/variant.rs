@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use super::file::FileArchive;
 use super::s3_glacier::S3GlacierArchive;
 use crate::traits::ArchiveData;
-use crate::traits::ArchiveFilter;
 use crate::traits::ArchiveStorage;
 
 /// Enum representing all possible archive storage implementations.
@@ -29,42 +28,14 @@ impl ArchiveStorage for ArchiveStorageVariant {
         }
     }
 
-    async fn archive_batch(&self, items: &[ArchiveData]) -> Result<Vec<String>> {
-        match self {
-            ArchiveStorageVariant::S3Glacier(inner) => inner.archive_batch(items).await,
-            ArchiveStorageVariant::File(inner) => inner.archive_batch(items).await,
-        }
-    }
-
-    async fn retrieve(&self, archive_id: &str) -> Result<Option<ArchiveData>> {
-        match self {
-            ArchiveStorageVariant::S3Glacier(inner) => inner.retrieve(archive_id).await,
-            ArchiveStorageVariant::File(inner) => inner.retrieve(archive_id).await,
-        }
-    }
-
-    async fn query(&self, filter: &ArchiveFilter) -> Result<Vec<String>> {
-        match self {
-            ArchiveStorageVariant::S3Glacier(inner) => inner.query(filter).await,
-            ArchiveStorageVariant::File(inner) => inner.query(filter).await,
-        }
-    }
-
-    async fn delete(&self, archive_id: &str) -> Result<bool> {
-        match self {
-            ArchiveStorageVariant::S3Glacier(inner) => inner.delete(archive_id).await,
-            ArchiveStorageVariant::File(inner) => inner.delete(archive_id).await,
-        }
-    }
-
-    async fn open(&mut self) -> Result<()> {
+    async fn open(&self) -> Result<()> {
         match self {
             ArchiveStorageVariant::S3Glacier(inner) => inner.open().await,
             ArchiveStorageVariant::File(inner) => inner.open().await,
         }
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&self) -> Result<()> {
         match self {
             ArchiveStorageVariant::S3Glacier(inner) => inner.close().await,
             ArchiveStorageVariant::File(inner) => inner.close().await,
