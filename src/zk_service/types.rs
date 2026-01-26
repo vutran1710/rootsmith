@@ -1,6 +1,8 @@
-use serde::{Deserialize, Serialize};
+use chrono::DateTime;
+use chrono::Utc;
+use serde::Deserialize;
+use serde::Serialize;
 use uuid::Uuid;
-use chrono::{DateTime, Utc};
 
 /// Selection count for data selection
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,7 +32,7 @@ pub enum Operator {
     /// Merkle16 operator
     Merkle16 {
         selection: DataSelection,
-        handler: String,  // 20-byte hex address with 0x prefix
+        handler: String, // 20-byte hex address with 0x prefix
     },
 }
 

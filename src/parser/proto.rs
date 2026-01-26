@@ -1,4 +1,6 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::anyhow;
+use anyhow::Context;
+use anyhow::Result;
 use prost::Message as ProstMessage;
 
 use crate::types::IncomingRecord;
@@ -10,8 +12,8 @@ pub mod proto {
 
 /// Parse a protobuf-encoded IncomingRecord from bytes
 pub fn parse_proto_message(data: &[u8]) -> Result<IncomingRecord> {
-    let proto_record = proto::IncomingRecord::decode(data)
-        .context("Failed to decode protobuf IncomingRecord")?;
+    let proto_record =
+        proto::IncomingRecord::decode(data).context("Failed to decode protobuf IncomingRecord")?;
 
     // Validate field lengths
     if proto_record.namespace.len() != 32 {

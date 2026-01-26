@@ -13,7 +13,7 @@ pub struct WasmLimits {
 impl Default for WasmLimits {
     fn default() -> Self {
         Self {
-            max_memory_pages: 2048,              // 128 MiB
+            max_memory_pages: 2048,               // 128 MiB
             max_response_bytes: 16 * 1024 * 1024, // 16 MiB
         }
     }
@@ -31,7 +31,7 @@ impl WasmLimits {
     /// Strict limits for untrusted plugins
     pub fn strict() -> Self {
         Self {
-            max_memory_pages: 1024,         // 64 MiB
+            max_memory_pages: 1024,              // 64 MiB
             max_response_bytes: 8 * 1024 * 1024, // 8 MiB
         }
     }
@@ -39,7 +39,7 @@ impl WasmLimits {
     /// Permissive limits for testing
     pub fn permissive() -> Self {
         Self {
-            max_memory_pages: 4096,         // 256 MiB
+            max_memory_pages: 4096,               // 256 MiB
             max_response_bytes: 64 * 1024 * 1024, // 64 MiB
         }
     }

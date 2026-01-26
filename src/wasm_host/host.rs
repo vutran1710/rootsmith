@@ -1,5 +1,12 @@
 use anyhow::Result;
-use wasmer::{imports, Engine, Instance, Memory, MemoryView, Module, Store, TypedFunction};
+use wasmer::imports;
+use wasmer::Engine;
+use wasmer::Instance;
+use wasmer::Memory;
+use wasmer::MemoryView;
+use wasmer::Module;
+use wasmer::Store;
+use wasmer::TypedFunction;
 use wasmer_compiler_cranelift::Cranelift;
 
 use crate::parser::proto::parse_proto_message;
@@ -99,9 +106,7 @@ impl WasmPluginHost {
         let mem_type = memory.ty(store);
 
         // Check if maximum is declared
-        let max_pages = mem_type
-            .maximum
-            .ok_or(WasmHostError::NoMemoryMaximum)?;
+        let max_pages = mem_type.maximum.ok_or(WasmHostError::NoMemoryMaximum)?;
 
         // Check if maximum exceeds limit
         if max_pages.0 > limits.max_memory_pages {
@@ -189,15 +194,18 @@ impl WasmPluginHost {
         // 8. Handle response status
         match status {
             0 => Ok(payload),
-            1 => Err(WasmHostError::PluginError(String::from_utf8_lossy(&payload).to_string()).into()),
+            1 => Err(
+                WasmHostError::PluginError(String::from_utf8_lossy(&payload).to_string()).into(),
+            ),
             other => Err(WasmHostError::UnknownStatus(other).into()),
         }
     }
 
     pub fn process_to_record(&mut self, input: &[u8]) -> Result<IncomingRecord> {
         let payload = self.process_bytes(input)?;
-        parse_proto_message(&payload)
-            .map_err(|e| WasmHostError::PluginError(format!("Failed to parse protobuf: {}", e)).into())
+        parse_proto_message(&payload).map_err(|e| {
+            WasmHostError::PluginError(format!("Failed to parse protobuf: {}", e)).into()
+        })
     }
 
     pub fn process_input<T>(&mut self, input: &[u8]) -> Result<Box<T>>
@@ -208,8 +216,9 @@ impl WasmPluginHost {
         let wrapper = detect_and_parse(payload)
             .map_err(|e| WasmHostError::PluginError(format!("Failed to detect format: {}", e)))?;
 
-        T::from_wrapper(wrapper)
-            .ok_or_else(|| WasmHostError::PluginError(format!("Output is not {} format", T::format_name())).into())
+        T::from_wrapper(wrapper).ok_or_else(|| {
+            WasmHostError::PluginError(format!("Output is not {} format", T::format_name())).into()
+        })
     }
 
     /// Get a view of plugin memory

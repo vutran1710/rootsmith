@@ -11,14 +11,13 @@ pub mod telemetry;
 pub mod traits;
 pub mod types;
 pub mod upstream;
+pub mod utils;
 pub mod wasm_host;
 pub mod zk_service;
 
 // Re-export commonly used types and traits
 // Re-export variant enums for convenience
 pub use accumulator::AccumulatorVariant;
-pub use accumulator::ZKTrait;
-pub use accumulator::ZkAccumulator;
 pub use archiver::ArchiveVariant;
 pub use config::AccumulatorType;
 pub use config::BaseConfig;
@@ -37,6 +36,9 @@ pub use types::Commitment;
 pub use types::Key32;
 pub use types::Namespace;
 pub use types::Record;
+pub use utils::HttpClient;
+pub use utils::HttpClientError;
+pub use utils::MultipartValue;
 pub use wasm_host::WasmHostError;
 pub use wasm_host::WasmLimits;
 pub use wasm_host::WasmPluginHost;

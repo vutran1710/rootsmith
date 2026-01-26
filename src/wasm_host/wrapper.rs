@@ -2,9 +2,11 @@ use serde_json;
 
 use crate::parser::proto::parse_proto_message;
 use crate::types::IncomingRecord;
-use crate::wasm_host::traits::{
-    RecordMeta, ToCustomJsonData, ToExtendedData, ToRawData, ToStandardData,
-};
+use crate::wasm_host::traits::RecordMeta;
+use crate::wasm_host::traits::ToCustomJsonData;
+use crate::wasm_host::traits::ToExtendedData;
+use crate::wasm_host::traits::ToRawData;
+use crate::wasm_host::traits::ToStandardData;
 
 /// Wrapper for Standard format (protobuf IncomingRecord).
 ///
@@ -157,7 +159,8 @@ pub fn detect_and_parse(bytes: Vec<u8>) -> Result<PluginOutputWrapper, String> {
             json.get("timestamp").and_then(|v| v.as_u64()),
         ) {
             // Try to parse namespace and key as hex
-            if let (Ok(namespace_bytes), Ok(key_bytes)) = (hex::decode(ns_str), hex::decode(k_str)) {
+            if let (Ok(namespace_bytes), Ok(key_bytes)) = (hex::decode(ns_str), hex::decode(k_str))
+            {
                 if namespace_bytes.len() == 32 && key_bytes.len() == 32 {
                     let mut namespace = [0u8; 32];
                     let mut key = [0u8; 32];
@@ -165,7 +168,8 @@ pub fn detect_and_parse(bytes: Vec<u8>) -> Result<PluginOutputWrapper, String> {
                     key.copy_from_slice(&key_bytes);
 
                     // Extract payload (could be in "payload" field or entire JSON)
-                    let final_payload = json.get("payload")
+                    let final_payload = json
+                        .get("payload")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string())
                         .unwrap_or_else(|| json.to_string());

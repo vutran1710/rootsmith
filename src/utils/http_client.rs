@@ -185,8 +185,18 @@ impl HttpClient {
         headers.insert("X-Format".to_string(), "protobuf".to_string());
         headers.insert("X-Schema-Version".to_string(), schema_version.to_string());
 
-        self.post_multipart_with_bytes(path, fields, data, Some(headers))
-            .await
+        let resp = self
+            .post_multipart_with_bytes(path, fields, data, Some(headers))
+            .await;
+
+        if resp.is_err() {
+            tracing::error!(
+                "HTTP Protobuf POST request failed: {:?}",
+                resp.as_ref().err()
+            );
+        }
+
+        resp
     }
 
     pub fn with_header(

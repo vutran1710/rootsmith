@@ -27,8 +27,8 @@ pub enum AccumulatorType {
     Merkle,
     /// Sparse Merkle tree accumulator.
     SparseMerkle,
-    /// ZK proof service accumulator.
-    Zk,
+    /// External
+    External,
 }
 
 impl Default for AccumulatorType {

@@ -1,13 +1,14 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use kanal::AsyncSender;
+use serde::Deserialize;
+use serde::Serialize;
 
+use super::external_service::ExternalServiceConfig;
 use super::merkle_accumulator::MerkleAccumulator;
 use super::sparse_merkle_accumulator::SparseMerkleAccumulator;
-use super::zk_accumulator::ZkAccumulator;
-use super::zk_adapter::ZkAccumulatorAdapter;
+use crate::accumulator::external_service::ExternalServiceAccumulator;
 use crate::config::AccumulatorType;
-use crate::config::BaseConfig;
 use crate::traits::Accumulator;
 use crate::types::CommitmentResult;
 use crate::types::Record;
@@ -16,21 +17,28 @@ use crate::types::Record;
 pub enum AccumulatorVariant {
     Merkle(MerkleAccumulator),
     SparseMerkle(SparseMerkleAccumulator),
-    Zk(ZkAccumulatorAdapter),
+    External(ExternalServiceAccumulator),
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct AccumulatorConfig {
+    pub external: Option<ExternalServiceConfig>,
 }
 
 impl AccumulatorVariant {
     /// Create a new accumulator instance based on the specified type.
-    pub fn new(accumulator_type: AccumulatorType, config: &BaseConfig) -> Self {
+    pub fn new(accumulator_type: AccumulatorType, config: &AccumulatorConfig) -> Self {
         match accumulator_type {
             AccumulatorType::Merkle => AccumulatorVariant::Merkle(MerkleAccumulator::default()),
             AccumulatorType::SparseMerkle => {
                 AccumulatorVariant::SparseMerkle(SparseMerkleAccumulator::new())
             }
-            AccumulatorType::Zk => {
-                let zk_accumulator =
-                    ZkAccumulator::new(&config.zk_service_url, &config.zk_circuit_id);
-                AccumulatorVariant::Zk(ZkAccumulatorAdapter::new(zk_accumulator))
+            AccumulatorType::External => {
+                let cfg = config
+                    .external
+                    .as_ref()
+                    .expect("External accumulator config must be provided");
+                AccumulatorVariant::External(ExternalServiceAccumulator::new(cfg.clone()))
             }
         }
     }
@@ -42,7 +50,7 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(_) => AccumulatorType::Merkle,
             AccumulatorVariant::SparseMerkle(_) => AccumulatorType::SparseMerkle,
-            AccumulatorVariant::Zk(_) => AccumulatorType::Zk,
+            AccumulatorVariant::External(_) => AccumulatorType::External,
         }
     }
 
@@ -54,7 +62,7 @@ impl Accumulator for AccumulatorVariant {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.commit(records, result_tx).await,
             AccumulatorVariant::SparseMerkle(inner) => inner.commit(records, result_tx).await,
-            AccumulatorVariant::Zk(inner) => inner.commit(records, result_tx).await,
+            AccumulatorVariant::External(inner) => inner.commit(records, result_tx).await,
         }
     }
 }

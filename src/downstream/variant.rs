@@ -20,9 +20,10 @@ impl DownstreamVariant {
     /// Create a new downstream instance based on the specified type.
     pub fn new(downstream_type: DownstreamType) -> Self {
         match downstream_type {
-            DownstreamType::S3 => {
-                DownstreamVariant::S3(S3Downstream::new("rootsmith-results".to_string(), "us-east-1".to_string()))
-            }
+            DownstreamType::S3 => DownstreamVariant::S3(S3Downstream::new(
+                "rootsmith-results".to_string(),
+                "us-east-1".to_string(),
+            )),
             DownstreamType::Blackhole => DownstreamVariant::Blackhole(BlackholeDownstream::new()),
         }
     }

@@ -19,7 +19,7 @@ impl PluginOutputTrait for dyn ToStandardData {
     fn from_wrapper(wrapper: PluginOutputWrapper) -> Option<Box<Self>> {
         wrapper.as_standard()
     }
-    
+
     fn format_name() -> &'static str {
         "Standard"
     }
@@ -33,7 +33,7 @@ impl PluginOutputTrait for dyn ToCustomJsonData {
     fn from_wrapper(wrapper: PluginOutputWrapper) -> Option<Box<Self>> {
         wrapper.as_custom_json()
     }
-    
+
     fn format_name() -> &'static str {
         "Custom JSON"
     }
@@ -48,7 +48,7 @@ impl PluginOutputTrait for dyn ToExtendedData {
     fn from_wrapper(wrapper: PluginOutputWrapper) -> Option<Box<Self>> {
         wrapper.as_extended()
     }
-    
+
     fn format_name() -> &'static str {
         "Extended"
     }
@@ -64,7 +64,7 @@ impl PluginOutputTrait for dyn ToRawData {
     fn from_wrapper(wrapper: PluginOutputWrapper) -> Option<Box<Self>> {
         wrapper.as_raw()
     }
-    
+
     fn format_name() -> &'static str {
         "Raw"
     }
