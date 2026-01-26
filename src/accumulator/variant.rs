@@ -4,12 +4,13 @@ use kanal::AsyncSender;
 
 use super::merkle_accumulator::MerkleAccumulator;
 use super::sparse_merkle_accumulator::SparseMerkleAccumulator;
-use super::zk_adapter::ZkAccumulatorAdapter;
 use super::zk_accumulator::ZkAccumulator;
-use crate::config::{AccumulatorType, BaseConfig};
+use super::zk_adapter::ZkAccumulatorAdapter;
+use crate::config::AccumulatorType;
+use crate::config::BaseConfig;
 use crate::traits::Accumulator;
 use crate::types::CommitmentResult;
-use crate::types::RawRecord;
+use crate::types::Record;
 
 /// Enum representing all possible accumulator implementations.
 pub enum AccumulatorVariant {
@@ -22,15 +23,13 @@ impl AccumulatorVariant {
     /// Create a new accumulator instance based on the specified type.
     pub fn new(accumulator_type: AccumulatorType, config: &BaseConfig) -> Self {
         match accumulator_type {
-            AccumulatorType::Merkle => AccumulatorVariant::Merkle(MerkleAccumulator::new()),
+            AccumulatorType::Merkle => AccumulatorVariant::Merkle(MerkleAccumulator::default()),
             AccumulatorType::SparseMerkle => {
                 AccumulatorVariant::SparseMerkle(SparseMerkleAccumulator::new())
             }
             AccumulatorType::Zk => {
-                let zk_accumulator = ZkAccumulator::new(
-                    &config.zk_service_url,
-                    &config.zk_circuit_id,
-                );
+                let zk_accumulator =
+                    ZkAccumulator::new(&config.zk_service_url, &config.zk_circuit_id);
                 AccumulatorVariant::Zk(ZkAccumulatorAdapter::new(zk_accumulator))
             }
         }
@@ -39,17 +38,17 @@ impl AccumulatorVariant {
 
 #[async_trait]
 impl Accumulator for AccumulatorVariant {
-    fn id(&self) -> &'static str {
+    fn accumulator_type(&self) -> AccumulatorType {
         match self {
-            AccumulatorVariant::Merkle(inner) => inner.id(),
-            AccumulatorVariant::SparseMerkle(inner) => inner.id(),
-            AccumulatorVariant::Zk(inner) => inner.id(),
+            AccumulatorVariant::Merkle(_) => AccumulatorType::Merkle,
+            AccumulatorVariant::SparseMerkle(_) => AccumulatorType::SparseMerkle,
+            AccumulatorVariant::Zk(_) => AccumulatorType::Zk,
         }
     }
 
     async fn commit(
-        &mut self,
-        records: &[RawRecord],
+        &self,
+        records: &[Record],
         result_tx: AsyncSender<CommitmentResult>,
     ) -> Result<()> {
         match self {

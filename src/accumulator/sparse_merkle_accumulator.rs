@@ -7,31 +7,39 @@ use anyhow::Result;
 use async_trait::async_trait;
 use kanal::AsyncSender;
 use monotree::database::MemoryDB;
-use monotree::hasher::Blake3 as MonotreeBlake3;
-use monotree::hasher::Hasher;
-use monotree::verify_proof as monotree_verify_proof;
 use monotree::Hash;
 use monotree::Monotree;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::traits::Accumulator;
+use crate::types::Commitment;
 use crate::types::CommitmentResult;
 use crate::types::Key32;
-use crate::types::Proof;
-use crate::types::ProofNode;
-use crate::types::RawRecord;
-use crate::types::Value32;
+use crate::types::Record;
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+struct ProofNode {
+    pub is_left: bool,
+    pub sibling: Vec<u8>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Proof {
+    pub nodes: Vec<ProofNode>,
+}
 
 /// Sparse Merkle tree based accumulator using monotree library.
 pub struct SparseMerkleAccumulator {
     tree: Mutex<Monotree<MemoryDB>>,
-    root: Mutex<Option<Hash>>,
+    root: Mutex<Hash>,
 }
 
 impl SparseMerkleAccumulator {
     pub fn new() -> Self {
         Self {
             tree: Mutex::new(Monotree::default()),
-            root: Mutex::new(None),
+            root: Mutex::new(Hash::default()),
         }
     }
 
@@ -64,61 +72,31 @@ impl Default for SparseMerkleAccumulator {
 
 #[async_trait]
 impl Accumulator for SparseMerkleAccumulator {
-    fn id(&self) -> &'static str {
-        "sparse-merkle"
+    fn accumulator_type(&self) -> crate::config::AccumulatorType {
+        crate::config::AccumulatorType::SparseMerkle
     }
 
     async fn commit(
-        &mut self,
-        records: &[RawRecord],
+        &self,
+        records: &[Record],
         result_tx: AsyncSender<CommitmentResult>,
     ) -> Result<()> {
-        // Clear any existing state
-        self.flush()?;
+        let mut tree = Monotree::default();
+        let mut root = Hash::default();
+        let mut proofs = HashMap::new();
 
-        // Add all records to the accumulator
         for record in records {
             let key_hash = Hash::from(record.key);
-            let leaf = Self::leaf_hash(&record.key, &record.value);
-
-            let mut tree = self.tree.lock().unwrap();
-            let mut root = self.root.lock().unwrap();
+            let leaf = Self::leaf_hash(&record.key, &record.value.as_bytes());
 
             let new_root = tree
-                .insert(root.as_ref(), &key_hash, &leaf)
+                .insert(Some(&root), &key_hash, &leaf)
                 .map_err(|e| anyhow::anyhow!("Failed to insert into tree: {:?}", e))?;
 
-            *root = new_root;
+            root = new_root.expect("empty root");
         }
 
-        // Build the root
-        let root = self.build_root()?;
-
-        // Generate proofs for all records with a single lock
-        let mut proofs = HashMap::new();
-        {
-            let mut tree = self.tree.lock().unwrap();
-            let tree_root = self.root.lock().unwrap();
-
-            if tree_root.is_some() {
-                for record in records {
-                    let key_hash = Hash::from(record.key);
-                    let monotree_proof = match tree.get_merkle_proof(tree_root.as_ref(), &key_hash)
-                    {
-                        Ok(Some(p)) => p,
-                        Ok(None) => continue, // Key not found in tree
-                        Err(_) => continue,   // Error during proof generation
-                    };
-
-                    let nodes: Vec<ProofNode> = monotree_proof
-                        .into_iter()
-                        .map(|(is_left, sibling)| ProofNode { is_left, sibling })
-                        .collect();
-
-                    proofs.insert(record.key, Proof { nodes });
-                }
-            }
-        } // Locks are dropped here
+        // TODO: Generate proofs for each key
 
         // Get current timestamp
         let committed_at = SystemTime::now()
@@ -127,10 +105,20 @@ impl Accumulator for SparseMerkleAccumulator {
             .as_secs();
 
         // Create and send result via channel
-        let result = CommitmentResult {
-            commitment: root,
-            proofs: Some(proofs),
+        let commitment = Commitment {
+            namespaces: records.iter().map(|r| r.namespace.clone()).collect(),
+            root: root.to_vec(),
             committed_at,
+        };
+        let result = CommitmentResult {
+            commitment,
+            item_count: records.len() as u64,
+            timestamp: committed_at,
+            proofs: proofs
+                .into_iter()
+                .map(|(k, v)| (k, serde_json::to_vec(&v).unwrap_or_default()))
+                .collect(),
+            meta: serde_json::json!({}),
         };
 
         result_tx
@@ -138,121 +126,6 @@ impl Accumulator for SparseMerkleAccumulator {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send commitment result: {}", e))?;
 
-        Ok(())
-    }
-}
-
-// ===== Private Helper Methods =====
-impl SparseMerkleAccumulator {
-    fn verify_proof(
-        &self,
-        root: &[u8; 32],
-        key: &Key32,
-        value: &[u8],
-        proof: Option<&Proof>,
-    ) -> Result<bool> {
-        let Some(proof) = proof else {
-            return Ok(false);
-        };
-
-        // root == 0 => coi như empty tree (tuỳ convention)
-        let root_hash = if root.iter().all(|&b| b == 0) {
-            None
-        } else {
-            Some(Hash::from(*root))
-        };
-
-        // leaf = H(key||value)
-        let leaf_hash = Self::leaf_hash(key, value);
-        for (depth, node) in proof.nodes.iter().enumerate() {
-            if depth >= 256 {
-                return Ok(false);
-            }
-
-            let bit = Self::key_bit_msb(key, depth);
-            let expected_is_left = bit; // bit=1 => sibling LEFT => is_left=true
-
-            if node.is_left != expected_is_left {
-                return Ok(false);
-            }
-        }
-
-        // Convert custom Proof -> monotree::Proof (Vec<(bool, Vec<u8>)>)
-        let monotree_proof: Vec<(bool, Vec<u8>)> = proof
-            .nodes
-            .iter()
-            .map(|n| (n.is_left, n.sibling.clone()))
-            .collect();
-
-        // Verify bằng monotree (hashing internal nodes)
-        let hasher = MonotreeBlake3::new();
-        let ok = monotree_verify_proof(
-            &hasher,
-            root_hash.as_ref(),
-            &leaf_hash,
-            Some(&monotree_proof),
-        );
-
-        Ok(ok)
-    }
-
-    fn put(&mut self, key: Key32, value: Value32) -> Result<()> {
-        let key_hash = Hash::from(key);
-        let leaf = Self::leaf_hash(&key, &value);
-
-        let mut tree = self.tree.lock().unwrap();
-        let mut root = self.root.lock().unwrap();
-
-        let new_root = tree
-            .insert(root.as_ref(), &key_hash, &leaf)
-            .map_err(|e| anyhow::anyhow!("Failed to insert into tree: {:?}", e))?;
-
-        *root = new_root;
-        Ok(())
-    }
-
-    fn build_root(&self) -> Result<Vec<u8>> {
-        let root = self.root.lock().unwrap();
-        Ok(match &*root {
-            Some(r) => r.as_ref().to_vec(),
-            None => vec![0u8; 32],
-        })
-    }
-
-    fn prove(&self, key: &Key32) -> Result<Option<Proof>> {
-        let key_hash = Hash::from(*key);
-
-        let mut tree = self.tree.lock().unwrap();
-        let root = self.root.lock().unwrap();
-
-        if root.is_none() {
-            return Ok(None);
-        }
-
-        // ✅ yêu cầu: nếu get_merkle_proof lỗi => return Ok(None)
-        let monotree_proof = match tree.get_merkle_proof(root.as_ref(), &key_hash) {
-            Ok(p) => p,
-            Err(_) => return Ok(None),
-        };
-
-        let Some(monotree_proof) = monotree_proof else {
-            return Ok(None);
-        };
-
-        let nodes: Vec<ProofNode> = monotree_proof
-            .into_iter()
-            .map(|(is_left, sibling)| ProofNode { is_left, sibling })
-            .collect();
-
-        Ok(Some(Proof { nodes }))
-    }
-
-    fn flush(&mut self) -> Result<()> {
-        let mut tree = self.tree.lock().unwrap();
-        let mut root = self.root.lock().unwrap();
-
-        *tree = Monotree::default();
-        *root = None;
         Ok(())
     }
 }

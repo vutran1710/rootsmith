@@ -14,6 +14,17 @@ pub enum UpstreamData {
     Text(String),
 }
 
+impl UpstreamData {
+    /// Convert the upstream data to a byte vector, if possible.
+    pub fn as_bytes(&self) -> Vec<u8> {
+        match self {
+            UpstreamData::Bytes(data) => data.clone(),
+            UpstreamData::Text(text) => text.as_bytes().to_vec(),
+            UpstreamData::Json(json) => serde_json::to_vec(json).unwrap_or_default(),
+        }
+    }
+}
+
 /// Data from connectors, parsed into records.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Record {
@@ -27,7 +38,7 @@ pub struct Record {
 /// belonging to a single namespace and time window.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Commitment {
-    pub namespace: Namespace,
+    pub namespaces: Vec<Namespace>,
     pub root: Vec<u8>,
     pub committed_at: u64,
 }

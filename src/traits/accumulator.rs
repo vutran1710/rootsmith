@@ -17,7 +17,7 @@ pub trait Accumulator: Send + Sync {
     fn accumulator_type(&self) -> AccumulatorType;
 
     async fn commit(
-        &mut self,
+        &self,
         records: &[Record],
         result_tx: AsyncSender<CommitmentResult>,
     ) -> Result<()>;
