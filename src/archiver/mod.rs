@@ -4,4 +4,4 @@ pub mod variant;
 
 pub use file::FileArchive;
 pub use s3_glacier::S3GlacierArchive;
-pub use variant::ArchiveStorageVariant;
+pub use variant::ArchiveVariant;

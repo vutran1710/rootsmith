@@ -19,7 +19,7 @@ pub mod zk_service;
 pub use accumulator::AccumulatorVariant;
 pub use accumulator::ZKTrait;
 pub use accumulator::ZkAccumulator;
-pub use archiver::ArchiveStorageVariant;
+pub use archiver::ArchiveVariant;
 pub use config::AccumulatorType;
 pub use config::BaseConfig;
 pub use config::DownstreamType;

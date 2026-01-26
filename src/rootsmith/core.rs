@@ -6,21 +6,28 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
+use kanal::unbounded_async;
+use kanal::AsyncSender;
+use tracing::error;
+use tracing::info;
+use tracing::warn;
 
-use crate::archiver::ArchiveStorageVariant;
+use crate::accumulator::AccumulatorVariant;
+use crate::archiver::ArchiveVariant;
 use crate::config::BaseConfig;
 use crate::downstream::DownstreamVariant;
 use crate::storage::Storage;
-use crate::types::{Namespace, RawRecord};
+use crate::traits::Accumulator;
+use crate::traits::Downstream;
+use crate::traits::UpstreamConnector;
+use crate::types::CommitmentResult;
+use crate::types::Namespace;
+use crate::types::RawRecord;
+use crate::types::UpstreamData;
 use crate::types::Value32;
 use crate::upstream::UpstreamVariant;
-use crate::wasm_host::{WasmPluginHost, ToStandardData};
-use crate::types::{CommitmentResult, UpstreamData};
-use crate::traits::{UpstreamConnector, Downstream, Accumulator};
-use crate::accumulator::AccumulatorVariant;
-use kanal::AsyncSender;
-use kanal::unbounded_async;
-use tracing::{error, info, warn};
+use crate::wasm_host::ToStandardData;
+use crate::wasm_host::WasmPluginHost;
 
 /// Epoch phase for the commit cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -49,7 +56,7 @@ pub struct RootSmith {
     pub downstream: DownstreamVariant,
 
     /// Archive storage implementation.
-    pub archive_storage: ArchiveStorageVariant,
+    pub archive_storage: ArchiveVariant,
 
     /// Global/base configuration.
     pub config: BaseConfig,
@@ -78,7 +85,7 @@ impl RootSmith {
     pub fn new(
         upstream: UpstreamVariant,
         downstream: DownstreamVariant,
-        archive_storage: ArchiveStorageVariant,
+        archive_storage: ArchiveVariant,
         config: BaseConfig,
         storage: Storage,
     ) -> Self {
@@ -103,7 +110,7 @@ impl RootSmith {
 
     /// Initialize RootSmith with default Noop implementations.
     pub async fn initialize(config: BaseConfig) -> Result<Self> {
-        use crate::archiver::ArchiveStorageVariant;
+        use crate::archiver::ArchiveVariant;
         use crate::archiver::NoopArchive;
         use crate::downstream::BlackholeDownstream;
         use crate::downstream::DownstreamVariant;
@@ -114,7 +121,7 @@ impl RootSmith {
 
         let upstream = UpstreamVariant::Noop(NoopUpstream);
         let downstream = DownstreamVariant::Blackhole(BlackholeDownstream::new());
-        let archive_storage = ArchiveStorageVariant::Noop(NoopArchive);
+        let archive_storage = ArchiveVariant::Noop(NoopArchive);
 
         Ok(Self::new(
             upstream,
@@ -135,15 +142,18 @@ impl RootSmith {
         self
     }
 
-
     pub async fn process_partner_data_to_zk(
         &self,
         partner_data: &[u8],
         result_tx: AsyncSender<CommitmentResult>,
     ) -> Result<()> {
-        let wasm_host = self.wasm_host.as_ref()
+        let wasm_host = self
+            .wasm_host
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("WASM host not configured"))?;
-        let accumulator = self.accumulator.as_ref()
+        let accumulator = self
+            .accumulator
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("Accumulator not configured"))?;
 
         let mut host_guard = wasm_host.lock().await;
@@ -178,23 +188,26 @@ impl RootSmith {
             match data {
                 UpstreamData::Raw(raw_bytes) => {
                     info!("Received raw data ({} bytes)", raw_bytes.len());
-                    
+
                     let (result_tx, result_rx) = unbounded_async();
-                    
+
                     match self.process_partner_data_to_zk(&raw_bytes, result_tx).await {
                         Ok(_) => {
                             info!("Data processed through WASM → ZK accumulator");
-                            
+
                             match result_rx.recv().await {
                                 Ok(result) => {
                                     info!("Commitment result received");
                                     info!("  Commitment: {} bytes", result.commitment.len());
                                     info!("  Committed at: {}", result.committed_at);
-                                    
+
                                     if let Err(e) = self.downstream.handle(&result).await {
                                         error!("Failed to send result to downstream: {}", e);
                                     } else {
-                                        info!("Result sent to downstream: {}", self.downstream.name());
+                                        info!(
+                                            "Result sent to downstream: {}",
+                                            self.downstream.name()
+                                        );
                                     }
                                 }
                                 Err(e) => {

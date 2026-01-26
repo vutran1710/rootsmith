@@ -7,17 +7,17 @@ use crate::traits::ArchiveData;
 use crate::traits::ArchiveStorage;
 
 /// Enum representing all possible archive storage implementations.
-pub enum ArchiveStorageVariant {
+pub enum ArchiveVariant {
     S3Glacier(S3GlacierArchive),
     File(FileArchive),
 }
 
 #[async_trait]
-impl ArchiveStorage for ArchiveStorageVariant {
+impl ArchiveStorage for ArchiveVariant {
     fn name(&self) -> &'static str {
         match self {
-            ArchiveStorageVariant::S3Glacier(inner) => inner.name(),
-            ArchiveStorageVariant::File(inner) => inner.name(),
+            ArchiveVariant::S3Glacier(inner) => inner.name(),
+            ArchiveVariant::File(inner) => inner.name(),
         }
     }
 
@@ -28,22 +28,22 @@ impl ArchiveStorage for ArchiveStorageVariant {
         data: ArchiveData,
     ) -> Result<String> {
         match self {
-            ArchiveStorageVariant::S3Glacier(inner) => inner.archive(ns, timestamp, data).await,
-            ArchiveStorageVariant::File(inner) => inner.archive(ns, timestamp, data).await,
+            ArchiveVariant::S3Glacier(inner) => inner.archive(ns, timestamp, data).await,
+            ArchiveVariant::File(inner) => inner.archive(ns, timestamp, data).await,
         }
     }
 
     async fn open(&self) -> Result<()> {
         match self {
-            ArchiveStorageVariant::S3Glacier(inner) => inner.open().await,
-            ArchiveStorageVariant::File(inner) => inner.open().await,
+            ArchiveVariant::S3Glacier(inner) => inner.open().await,
+            ArchiveVariant::File(inner) => inner.open().await,
         }
     }
 
     async fn close(&self) -> Result<()> {
         match self {
-            ArchiveStorageVariant::S3Glacier(inner) => inner.close().await,
-            ArchiveStorageVariant::File(inner) => inner.close().await,
+            ArchiveVariant::S3Glacier(inner) => inner.close().await,
+            ArchiveVariant::File(inner) => inner.close().await,
         }
     }
 }
