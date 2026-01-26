@@ -3,26 +3,6 @@ use clap::ValueEnum;
 use serde::Deserialize;
 use serde::Serialize;
 
-/// Type of upstream connector to use.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
-#[serde(rename_all = "kebab-case")]
-pub enum UpstreamType {
-    /// HTTP server upstream.
-    Http,
-    /// WebSocket upstream.
-    WebSocket,
-    /// No-op upstream (does nothing).
-    Noop,
-    /// Mock upstream (for testing).
-    Mock,
-}
-
-impl Default for UpstreamType {
-    fn default() -> Self {
-        UpstreamType::Mock
-    }
-}
-
 /// Type of downstream handler to use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]

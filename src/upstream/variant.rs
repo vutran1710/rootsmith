@@ -1,35 +1,60 @@
 use anyhow::Result;
 use async_trait::async_trait;
+use clap::ValueEnum;
 use kanal::AsyncSender;
+use serde::Deserialize;
+use serde::Serialize;
 
-use super::http::HttpSource;
-use super::mock::MockUpstream;
-use super::noop::NoopUpstream;
+#[cfg(test)]
+use super::channel::Channel;
+use super::http::Http;
 use super::websocket::WebSocketSource;
-use crate::config::UpstreamType;
 use crate::traits::UpstreamConnector;
 use crate::types::UpstreamData;
 
+/// Type of upstream connector to use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
+#[serde(rename_all = "kebab-case")]
+pub enum UpstreamType {
+    Http,
+    WebSocket,
+    #[cfg(test)]
+    Channel,
+}
+
 /// Enum representing all possible upstream connector implementations.
 pub enum UpstreamVariant {
-    Http(HttpSource),
+    Http(Http),
     WebSocket(WebSocketSource),
-    Noop(NoopUpstream),
-    Mock(MockUpstream),
+    #[cfg(test)]
+    Channel(Channel),
+}
+
+pub enum UpstreamConfig {
+    HttpConfig { port: u16, api_key: Option<String> },
+    WebSocketConfig { port: u16, api_key: Option<String> },
 }
 
 impl UpstreamVariant {
     /// Create a new upstream connector instance based on the specified type.
-    pub fn new(upstream_type: UpstreamType) -> Self {
+    pub fn new(upstream_type: UpstreamType, config: UpstreamConfig) -> Self {
         match upstream_type {
             UpstreamType::Http => {
-                UpstreamVariant::Http(HttpSource::new("127.0.0.1:8080".to_string()))
+                let (port, api_key) = match config {
+                    UpstreamConfig::HttpConfig { port, api_key } => (port, api_key),
+                    _ => panic!("Invalid config for HTTP upstream"),
+                };
+                UpstreamVariant::Http(Http { port, api_key })
             }
             UpstreamType::WebSocket => {
-                UpstreamVariant::WebSocket(WebSocketSource::new("ws://localhost:8080".to_string()))
+                let (port, api_key) = match config {
+                    UpstreamConfig::WebSocketConfig { port, api_key } => (port, api_key),
+                    _ => panic!("Invalid config for WebSocket upstream"),
+                };
+                UpstreamVariant::WebSocket(WebSocketSource::new(port, api_key))
             }
-            UpstreamType::Noop => UpstreamVariant::Noop(NoopUpstream),
-            UpstreamType::Mock => UpstreamVariant::Mock(MockUpstream::default()),
+            #[cfg(test)]
+            UpstreamType::Channel => UpstreamVariant::Channel(Channel::default()),
         }
     }
 }
@@ -40,8 +65,8 @@ impl UpstreamConnector for UpstreamVariant {
         match self {
             UpstreamVariant::Http(inner) => inner.name(),
             UpstreamVariant::WebSocket(inner) => inner.name(),
-            UpstreamVariant::Noop(inner) => inner.name(),
-            UpstreamVariant::Mock(inner) => inner.name(),
+            #[cfg(test)]
+            UpstreamVariant::Channel(_) => "[kanal-based-channel-upstream for testing]",
         }
     }
 
@@ -49,8 +74,8 @@ impl UpstreamConnector for UpstreamVariant {
         match self {
             UpstreamVariant::Http(inner) => inner.open(tx).await,
             UpstreamVariant::WebSocket(inner) => inner.open(tx).await,
-            UpstreamVariant::Noop(inner) => inner.open(tx).await,
-            UpstreamVariant::Mock(inner) => inner.open(tx).await,
+            #[cfg(test)]
+            UpstreamVariant::Channel(inner) => inner.bind_forward_loop(tx).await,
         }
     }
 
@@ -58,8 +83,8 @@ impl UpstreamConnector for UpstreamVariant {
         match self {
             UpstreamVariant::Http(inner) => inner.close().await,
             UpstreamVariant::WebSocket(inner) => inner.close().await,
-            UpstreamVariant::Noop(inner) => inner.close().await,
-            UpstreamVariant::Mock(inner) => inner.close().await,
+            #[cfg(test)]
+            UpstreamVariant::Channel(inner) => inner.close().await,
         }
     }
 }

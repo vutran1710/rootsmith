@@ -1,10 +1,8 @@
+pub mod channel;
 pub mod http;
-pub mod mock;
-pub mod noop;
 pub mod variant;
 pub mod websocket;
 
-pub use http::HttpSource;
-pub use mock::MockUpstream;
-pub use noop::NoopUpstream;
-pub use variant::UpstreamVariant;
+pub use channel::Channel;
+pub use http::Http;
+pub use websocket::WebSocketSource;
