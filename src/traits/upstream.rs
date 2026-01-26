@@ -19,8 +19,8 @@ pub trait UpstreamConnector: Send + Sync {
     /// - spawn a thread / async task,
     /// - read from external source,
     /// - push `UpstreamData` into the provided channel.
-    async fn open(&mut self, tx: AsyncSender<UpstreamData>) -> Result<()>;
+    async fn open(&self, tx: AsyncSender<UpstreamData>) -> Result<()>;
 
     /// Close/stop the connector and release resources.
-    async fn close(&mut self) -> Result<()>;
+    async fn close(&self) -> Result<()>;
 }

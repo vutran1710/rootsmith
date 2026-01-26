@@ -1,3 +1,4 @@
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
 use anyhow::Context;
@@ -14,10 +15,12 @@ use tokio_tungstenite::WebSocketStream;
 use crate::traits::UpstreamConnector;
 use crate::types::UpstreamData;
 
+type Connection = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
+
 pub struct WebSocketSource {
     port: u16,
     api_key: Option<String>,
-    connection_handle: Option<Arc<Mutex<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>>>>,
+    should_close: Arc<AtomicBool>,
 }
 
 impl WebSocketSource {
@@ -25,7 +28,7 @@ impl WebSocketSource {
         Self {
             port,
             api_key,
-            connection_handle: None,
+            should_close: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -68,7 +71,7 @@ impl UpstreamConnector for WebSocketSource {
         "websocket"
     }
 
-    async fn open(&mut self, tx: AsyncSender<UpstreamData>) -> Result<()> {
+    async fn open(&self, tx: AsyncSender<UpstreamData>) -> Result<()> {
         let url = format!("ws://localhost:{}", self.port);
         tracing::info!("Opening WebSocket connection: {}", url);
 
@@ -78,7 +81,7 @@ impl UpstreamConnector for WebSocketSource {
             .context("Failed to connect to WebSocket")?;
 
         let ws_stream = Arc::new(Mutex::new(ws_stream));
-        self.connection_handle = Some(Arc::clone(&ws_stream));
+        let should_close = self.should_close.clone();
 
         let tx_clone = tx.clone();
         let stream_clone = Arc::clone(&ws_stream);
@@ -100,6 +103,11 @@ impl UpstreamConnector for WebSocketSource {
                 };
 
                 Self::handle_message(msg, &tx_clone).await?;
+
+                if should_close.load(std::sync::atomic::Ordering::Relaxed) {
+                    tracing::info!("WebSocket connection is closing as requested");
+                    return Ok(());
+                }
             }
             Ok::<(), anyhow::Error>(())
         });
@@ -107,17 +115,10 @@ impl UpstreamConnector for WebSocketSource {
         Ok(())
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&self) -> Result<()> {
         tracing::info!("Closing WebSocket connection");
-
-        if let Some(stream) = &self.connection_handle {
-            let mut ws = stream.lock().await;
-            ws.close(None)
-                .await
-                .context("Failed to close WebSocket connection")?;
-        }
-
-        self.connection_handle = None;
+        self.should_close
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }

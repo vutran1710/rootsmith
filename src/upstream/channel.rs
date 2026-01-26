@@ -19,7 +19,7 @@ impl Default for Channel {
 }
 
 impl Channel {
-    pub async fn bind_forward_loop(&mut self, tx: AsyncSender<UpstreamData>) -> Result<()> {
+    pub async fn bind_forward_loop(&self, tx: AsyncSender<UpstreamData>) -> Result<()> {
         let counter = AtomicUsize::new(0);
         while let Ok(data) = self.rx.recv().await {
             if let Err(e) = tx.send(data).await {
@@ -35,7 +35,7 @@ impl Channel {
         Ok(())
     }
 
-    pub async fn close(&mut self) -> Result<()> {
+    pub async fn close(&self) -> Result<()> {
         self.tx.close()?;
         Ok(())
     }

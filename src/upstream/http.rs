@@ -19,13 +19,13 @@ impl UpstreamConnector for Http {
         "HTTP Upstream"
     }
 
-    async fn open(&mut self, _tx: AsyncSender<UpstreamData>) -> Result<()> {
+    async fn open(&self, _tx: AsyncSender<UpstreamData>) -> Result<()> {
         tracing::info!("Starting HTTP upstream on port {}", self.port);
         // Placeholder for actual HTTP server implementation
         Ok(())
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&self) -> Result<()> {
         tracing::info!("Stopping HTTP upstream");
         // Placeholder for actual shutdown logic
         Ok(())

@@ -70,7 +70,7 @@ impl UpstreamConnector for UpstreamVariant {
         }
     }
 
-    async fn open(&mut self, tx: AsyncSender<UpstreamData>) -> Result<()> {
+    async fn open(&self, tx: AsyncSender<UpstreamData>) -> Result<()> {
         match self {
             UpstreamVariant::Http(inner) => inner.open(tx).await,
             UpstreamVariant::WebSocket(inner) => inner.open(tx).await,
@@ -79,7 +79,7 @@ impl UpstreamConnector for UpstreamVariant {
         }
     }
 
-    async fn close(&mut self) -> Result<()> {
+    async fn close(&self) -> Result<()> {
         match self {
             UpstreamVariant::Http(inner) => inner.close().await,
             UpstreamVariant::WebSocket(inner) => inner.close().await,
