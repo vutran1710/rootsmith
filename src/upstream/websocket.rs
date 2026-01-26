@@ -67,15 +67,14 @@ impl WebSocketSource {
 
 #[async_trait]
 impl UpstreamConnector for WebSocketSource {
-    fn name(&self) -> &'static str {
-        "websocket"
+    fn upstream_type(&self) -> crate::upstream::variant::UpstreamType {
+        crate::upstream::variant::UpstreamType::WebSocket
     }
 
     async fn open(&self, tx: AsyncSender<UpstreamData>) -> Result<()> {
         let url = format!("ws://localhost:{}", self.port);
         tracing::info!("Opening WebSocket connection: {}", url);
 
-        // Connect to WebSocket
         let (ws_stream, _) = connect_async(&url)
             .await
             .context("Failed to connect to WebSocket")?;

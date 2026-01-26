@@ -61,12 +61,12 @@ impl UpstreamVariant {
 
 #[async_trait]
 impl UpstreamConnector for UpstreamVariant {
-    fn name(&self) -> &'static str {
+    fn upstream_type(&self) -> UpstreamType {
         match self {
-            UpstreamVariant::Http(inner) => inner.name(),
-            UpstreamVariant::WebSocket(inner) => inner.name(),
+            UpstreamVariant::Http(_) => UpstreamType::Http,
+            UpstreamVariant::WebSocket(_) => UpstreamType::WebSocket,
             #[cfg(test)]
-            UpstreamVariant::Channel(_) => "[kanal-based-channel-upstream for testing]",
+            UpstreamVariant::Channel(_) => UpstreamType::Channel,
         }
     }
 

@@ -15,8 +15,8 @@ impl Http {}
 
 #[async_trait]
 impl UpstreamConnector for Http {
-    fn name(&self) -> &'static str {
-        "HTTP Upstream"
+    fn upstream_type(&self) -> crate::upstream::variant::UpstreamType {
+        crate::upstream::variant::UpstreamType::Http
     }
 
     async fn open(&self, _tx: AsyncSender<UpstreamData>) -> Result<()> {

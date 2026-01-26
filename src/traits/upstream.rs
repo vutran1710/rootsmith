@@ -3,6 +3,7 @@ use async_trait::async_trait;
 use kanal::AsyncSender;
 
 use crate::types::UpstreamData;
+use crate::upstream::variant::UpstreamType;
 
 /// Trait for upstream data sources (websocket, Kafka, SQS, MQTT, etc.).
 ///
@@ -11,7 +12,7 @@ use crate::types::UpstreamData;
 #[async_trait]
 pub trait UpstreamConnector: Send + Sync {
     /// Human-readable connector name for logging.
-    fn name(&self) -> &'static str;
+    fn upstream_type(&self) -> UpstreamType;
 
     /// Open/start the connector with a channel to send data.
     ///
