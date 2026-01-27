@@ -37,6 +37,7 @@ thiserror = "2"
 wasmer = "4"
 wasmer-compiler-cranelift = "4"
 arrow = "57.2.0"
+tempfile = "3"
 # optional future deps:
 # rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
 

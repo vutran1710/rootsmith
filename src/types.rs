@@ -5,6 +5,16 @@ use serde::Serialize;
 
 pub type Namespace = [u8; 32];
 pub type Key32 = [u8; 32];
+pub type Value32 = [u8; 32];
+
+/// Record with fixed-size value, used for WASM plugin output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct IncomingRecord {
+    pub namespace: Namespace,
+    pub key: Key32,
+    pub value: Value32,
+    pub timestamp: u64,
+}
 
 /// Data received from upstream connectors.
 #[derive(Debug, Clone, Serialize, Deserialize)]

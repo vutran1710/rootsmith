@@ -11,7 +11,7 @@ use super::Accumulator;
 use crate::types::CommitmentResult;
 use crate::types::Record;
 use crate::utils::HttpClient;
-use crate::MultipartValue;
+use crate::utils::MultipartValue;
 
 pub enum Transport {
     Http(HttpClient),

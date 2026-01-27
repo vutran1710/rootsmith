@@ -15,7 +15,7 @@ use super::Accumulator;
 use crate::types::CommitmentResult;
 use crate::types::Key32;
 use crate::types::Record;
-use crate::Commitment;
+use crate::types::Commitment;
 
 #[derive(Default)]
 pub struct MerkleAccumulator {
