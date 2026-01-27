@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use serde::Deserialize;
 use serde::Serialize;
 
-pub type Namespace = [u8; 32];
-pub type Key32 = [u8; 32];
+pub type Namespace = [u8; 16];
+pub type Key16 = [u8; 16];
 
 /// Data received from upstream connectors.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,13 +29,14 @@ impl UpstreamData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Record {
     pub namespace: Namespace,
-    pub key: Key32,
+    pub key: Key16,
     pub value: UpstreamData,
     pub timestamp: u64,
+    pub metadata: Option<serde_json::Value>,
 }
 
 impl Record {
-    pub const MAX_ENCODED_BYTES: usize = 4 * 1024 * 1024; // adjust
+    pub const MAX_ENCODED_BYTES: usize = 4 * 1024 * 1024;
 
     /// Serialize this record to bytes using postcard.
     pub fn to_postcard_bytes(&self) -> Result<Vec<u8>, postcard::Error> {
@@ -46,7 +47,6 @@ impl Record {
     /// Enforces a max size to avoid corrupted/hostile blobs.
     pub fn from_postcard_bytes(bytes: &[u8]) -> Result<Self, postcard::Error> {
         if bytes.len() > Self::MAX_ENCODED_BYTES {
-            // postcard::Error doesn't have a great "custom" variant; pick a generic error.
             return Err(postcard::Error::DeserializeBadEncoding);
         }
         postcard::from_bytes(bytes)
@@ -67,6 +67,6 @@ pub struct CommitmentResult {
     pub commitment: Commitment,
     pub item_count: u64,
     pub timestamp: u64,
-    pub proofs: HashMap<Key32, Vec<u8>>,
+    pub proofs: HashMap<Key16, Vec<u8>>,
     pub meta: serde_json::Value,
 }

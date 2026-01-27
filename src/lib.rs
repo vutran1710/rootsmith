@@ -23,7 +23,7 @@ pub use rootsmith::EpochPhase;
 pub use rootsmith::RootSmith;
 pub use storage::Storage;
 pub use types::Commitment;
-pub use types::Key32;
+pub use types::Key16;
 pub use types::Namespace;
 pub use types::Record;
 pub use utils::HttpClient;
