@@ -1,14 +1,14 @@
 use serde_json;
 
 use crate::parser::proto::parse_proto_message;
-use crate::types::IncomingRecord;
+use crate::types::Record;
 use crate::wasm_host::traits::RecordMeta;
 use crate::wasm_host::traits::ToCustomJsonData;
 use crate::wasm_host::traits::ToExtendedData;
 use crate::wasm_host::traits::ToRawData;
 use crate::wasm_host::traits::ToStandardData;
 
-/// Wrapper for Standard format (protobuf IncomingRecord).
+/// Wrapper for Standard format (protobuf Record).
 ///
 /// This wrapper implements `ToStandardData` and can be returned as a trait object.
 #[derive(Debug, Clone)]
@@ -39,8 +39,8 @@ impl ToStandardData for StandardWrapper {
     }
 }
 
-impl From<IncomingRecord> for StandardWrapper {
-    fn from(record: IncomingRecord) -> Self {
+impl From<Record> for StandardWrapper {
+    fn from(record: Record) -> Self {
         Self {
             namespace: record.namespace,
             key: record.key,

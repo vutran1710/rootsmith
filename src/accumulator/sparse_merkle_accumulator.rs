@@ -83,7 +83,6 @@ impl Accumulator for SparseMerkleAccumulator {
     ) -> Result<()> {
         let mut tree = Monotree::default();
         let mut root = Hash::default();
-        let mut proofs = HashMap::new();
 
         for record in records {
             let key_hash = Hash::from(record.key);
@@ -114,10 +113,7 @@ impl Accumulator for SparseMerkleAccumulator {
             commitment,
             item_count: records.len() as u64,
             timestamp: committed_at,
-            proofs: proofs
-                .into_iter()
-                .map(|(k, v)| (k, serde_json::to_vec(&v).unwrap_or_default()))
-                .collect(),
+            proofs: HashMap::default(),
             meta: serde_json::json!({}),
         };
 

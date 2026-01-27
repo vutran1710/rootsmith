@@ -22,10 +22,8 @@ use crate::traits::Downstream;
 use crate::traits::UpstreamConnector;
 use crate::types::CommitmentResult;
 use crate::types::Namespace;
-use crate::types::RawRecord;
 use crate::types::UpstreamData;
-use crate::types::Value32;
-use crate::upstream::UpstreamVariant;
+use crate::upstream::variant::UpstreamVariant;
 use crate::wasm_host::ToStandardData;
 use crate::wasm_host::WasmPluginHost;
 
@@ -110,18 +108,12 @@ impl RootSmith {
 
     /// Initialize RootSmith with default Noop implementations.
     pub async fn initialize(config: BaseConfig) -> Result<Self> {
-        use crate::archiver::ArchiveVariant;
-        use crate::archiver::NoopArchive;
-        use crate::downstream::BlackholeDownstream;
-        use crate::downstream::DownstreamVariant;
-        use crate::upstream::NoopUpstream;
-
         let storage = Storage::open(&config.storage_path)?;
         info!("Storage opened at: {}", config.storage_path);
 
-        let upstream = UpstreamVariant::Noop(NoopUpstream);
-        let downstream = DownstreamVariant::Blackhole(BlackholeDownstream::new());
-        let archive_storage = ArchiveVariant::Noop(NoopArchive);
+        let upstream = UpstreamVariant::new(&config.upstream).await?;
+        let downstream = DownstreamVariant::new(&config.downstream).await?;
+        let archive_storage = ArchiveVariant::new(&config.archive).await?;
 
         Ok(Self::new(
             upstream,

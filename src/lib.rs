@@ -13,7 +13,6 @@ pub mod types;
 pub mod upstream;
 pub mod utils;
 pub mod wasm_host;
-pub mod zk_service;
 
 // Re-export commonly used types and traits
 // Re-export variant enums for convenience
