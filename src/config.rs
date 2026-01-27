@@ -3,7 +3,7 @@ use crate::archiver::ArchiveConfig;
 use crate::downstream::DownstreamConfig;
 use crate::upstream::UpstreamConfig;
 
-// TODO: implement this as clap config
+// TODO: implement this as clap config + toml deserializable struct
 pub struct Config {
     pub storage_path: String,
 
