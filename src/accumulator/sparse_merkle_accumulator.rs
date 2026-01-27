@@ -15,7 +15,7 @@ use serde::Serialize;
 use super::Accumulator;
 use crate::types::Commitment;
 use crate::types::CommitmentResult;
-use crate::types::Key32;
+use crate::types::Key16;
 use crate::types::Record;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -45,7 +45,7 @@ impl SparseMerkleAccumulator {
 
     /// leaf = H(key || value) (32 bytes)
     #[inline]
-    fn leaf_hash(key: &Key32, value: &[u8]) -> Hash {
+    fn leaf_hash(key: &Key16, value: &[u8]) -> Hash {
         let mut buf = Vec::with_capacity(key.len() + value.len());
         buf.extend_from_slice(key);
         buf.extend_from_slice(value);
@@ -57,7 +57,7 @@ impl SparseMerkleAccumulator {
     }
 
     #[inline]
-    fn key_bit_msb(key: &Key32, depth: usize) -> bool {
+    fn key_bit_msb(key: &Key16, depth: usize) -> bool {
         let byte = key[depth / 8];
         let bit = 7 - (depth % 8);
         ((byte >> bit) & 1) == 1
@@ -81,7 +81,9 @@ impl Accumulator for SparseMerkleAccumulator {
         let mut root = Hash::default();
 
         for record in records {
-            let key_hash = Hash::from(record.key);
+            let mut key32 = [0u8; 32];
+            key32[..16].copy_from_slice(&record.key);
+            let key_hash = Hash::from(key32);
             let leaf = Self::leaf_hash(&record.key, &record.value.as_bytes());
 
             let new_root = tree

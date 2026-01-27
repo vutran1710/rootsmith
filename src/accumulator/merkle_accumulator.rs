@@ -14,7 +14,7 @@ use tokio::sync::Mutex;
 use super::Accumulator;
 use crate::types::Commitment;
 use crate::types::CommitmentResult;
-use crate::types::Key32;
+use crate::types::Key16;
 use crate::types::Record;
 
 #[derive(Default)]
@@ -24,7 +24,7 @@ pub struct MerkleAccumulator {
 
 impl MerkleAccumulator {
     #[inline]
-    fn leaf_hash(key: &Key32, value: &[u8]) -> [u8; 32] {
+    fn leaf_hash(key: &Key16, value: &[u8]) -> [u8; 32] {
         // Hash both key and value: H( key || value )
         let mut data = Vec::with_capacity(key.len() + value.len());
         data.extend_from_slice(key);
