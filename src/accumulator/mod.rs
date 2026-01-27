@@ -14,7 +14,6 @@ use sparse_merkle_accumulator::SparseMerkleAccumulator;
 
 use crate::types::CommitmentResult;
 use crate::types::Record;
-use crate::AccumulatorType;
 
 /// The accumulator is a blackbox module that handles batch processing of records.
 /// It produces commitment results that are delivered asynchronously via channels,
@@ -41,23 +40,21 @@ pub enum AccumulatorVariant {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub struct AccumulatorConfig {
-    pub external: Option<ExternalServiceConfig>,
+pub enum AccumulatorConfig {
+    Merkle,
+    SparseMerkle,
+    External(ExternalServiceConfig),
 }
 
 impl AccumulatorVariant {
     /// Create a new accumulator instance based on the specified type.
-    pub fn new(accumulator_type: AccumulatorType, config: &AccumulatorConfig) -> Self {
-        match accumulator_type {
-            AccumulatorType::Merkle => AccumulatorVariant::Merkle(MerkleAccumulator::default()),
-            AccumulatorType::SparseMerkle => {
+    pub fn new(config: &AccumulatorConfig) -> Self {
+        match config {
+            AccumulatorConfig::Merkle => AccumulatorVariant::Merkle(MerkleAccumulator::default()),
+            AccumulatorConfig::SparseMerkle => {
                 AccumulatorVariant::SparseMerkle(SparseMerkleAccumulator::new())
             }
-            AccumulatorType::External => {
-                let cfg = config
-                    .external
-                    .as_ref()
-                    .expect("External accumulator config must be provided");
+            AccumulatorConfig::External(cfg) => {
                 AccumulatorVariant::External(ExternalServiceAccumulator::new(cfg.clone()))
             }
         }

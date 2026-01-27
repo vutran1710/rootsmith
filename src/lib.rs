@@ -17,9 +17,7 @@ pub mod wasm_host;
 // Re-export variant enums for convenience
 pub use accumulator::AccumulatorVariant;
 pub use archiver::ArchiveVariant;
-pub use config::AccumulatorType;
-pub use config::BaseConfig;
-pub use config::DownstreamType;
+pub use config::Config;
 pub use downstream::DownstreamVariant;
 pub use rootsmith::CommittedRecord;
 pub use rootsmith::EpochPhase;

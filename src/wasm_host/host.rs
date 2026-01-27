@@ -10,7 +10,7 @@ use wasmer::TypedFunction;
 use wasmer_compiler_cranelift::Cranelift;
 
 use crate::parser::proto::parse_proto_message;
-use crate::types::IncomingRecord;
+use crate::types::Record;
 use crate::wasm_host::error::WasmHostError;
 use crate::wasm_host::limits::WasmLimits;
 use crate::wasm_host::wrapper::detect_and_parse;
@@ -201,7 +201,7 @@ impl WasmPluginHost {
         }
     }
 
-    pub fn process_to_record(&mut self, input: &[u8]) -> Result<IncomingRecord> {
+    pub fn process_to_record(&mut self, input: &[u8]) -> Result<Record> {
         let payload = self.process_bytes(input)?;
         parse_proto_message(&payload).map_err(|e| {
             WasmHostError::PluginError(format!("Failed to parse protobuf: {}", e)).into()

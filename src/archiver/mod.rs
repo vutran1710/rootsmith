@@ -4,8 +4,10 @@ pub mod s3_glacier;
 use anyhow::Result;
 use arrow::array::RecordBatch;
 use async_trait::async_trait;
-pub use file::FileArchive;
-pub use s3_glacier::S3GlacierArchive;
+use file::FileArchive;
+use s3_glacier::S3GlacierArchive;
+use serde::Deserialize;
+use serde::Serialize;
 
 use crate::types::Namespace;
 
@@ -38,6 +40,41 @@ pub trait ArchiveStorage: Send + Sync {
 pub enum ArchiveVariant {
     S3(S3GlacierArchive),
     File(FileArchive),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ArchiveConfig {
+    S3 {
+        bucket: String,
+        region: String,
+        prefix: Option<String>,
+    },
+    File {
+        directory: String,
+    },
+}
+
+impl ArchiveVariant {
+    pub fn new(config: ArchiveConfig) -> Self {
+        match config {
+            ArchiveConfig::S3 {
+                bucket,
+                region,
+                prefix,
+            } => {
+                let archive = if let Some(p) = prefix {
+                    S3GlacierArchive::with_prefix(bucket, region, p)
+                } else {
+                    S3GlacierArchive::new(bucket, region)
+                };
+                ArchiveVariant::S3(archive)
+            }
+            ArchiveConfig::File { directory } => {
+                let archive = FileArchive::new(std::path::PathBuf::from(directory));
+                ArchiveVariant::File(archive)
+            }
+        }
+    }
 }
 
 #[async_trait]

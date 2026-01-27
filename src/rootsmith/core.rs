@@ -6,25 +6,15 @@ use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
 use anyhow::Result;
-use kanal::unbounded_async;
-use kanal::AsyncSender;
-use tracing::error;
 use tracing::info;
-use tracing::warn;
 
 use crate::accumulator::AccumulatorVariant;
 use crate::archiver::ArchiveVariant;
-use crate::config::BaseConfig;
+use crate::config::Config;
 use crate::downstream::DownstreamVariant;
 use crate::storage::Storage;
-use crate::traits::Accumulator;
-use crate::traits::Downstream;
-use crate::traits::UpstreamConnector;
-use crate::types::CommitmentResult;
 use crate::types::Namespace;
-use crate::types::UpstreamData;
-use crate::upstream::variant::UpstreamVariant;
-use crate::wasm_host::ToStandardData;
+use crate::upstream::UpstreamVariant;
 use crate::wasm_host::WasmPluginHost;
 
 /// Epoch phase for the commit cycle.
@@ -57,7 +47,7 @@ pub struct RootSmith {
     pub archive_storage: ArchiveVariant,
 
     /// Global/base configuration.
-    pub config: BaseConfig,
+    pub config: Config,
 
     /// Persistent storage (RocksDB).
     pub storage: Arc<tokio::sync::Mutex<Storage>>,
@@ -84,7 +74,7 @@ impl RootSmith {
         upstream: UpstreamVariant,
         downstream: DownstreamVariant,
         archive_storage: ArchiveVariant,
-        config: BaseConfig,
+        config: Config,
         storage: Storage,
     ) -> Self {
         let now = SystemTime::now()
@@ -107,13 +97,13 @@ impl RootSmith {
     }
 
     /// Initialize RootSmith with default Noop implementations.
-    pub async fn initialize(config: BaseConfig) -> Result<Self> {
+    pub async fn initialize(config: Config) -> Result<Self> {
         let storage = Storage::open(&config.storage_path)?;
         info!("Storage opened at: {}", config.storage_path);
 
-        let upstream = UpstreamVariant::new(&config.upstream).await?;
-        let downstream = DownstreamVariant::new(&config.downstream).await?;
-        let archive_storage = ArchiveVariant::new(&config.archive).await?;
+        let upstream = UpstreamVariant::new(config.upstream.clone());
+        let downstream = DownstreamVariant::new(config.downstream.clone());
+        let archive_storage = ArchiveVariant::new(config.archive.clone());
 
         Ok(Self::new(
             upstream,
@@ -132,93 +122,5 @@ impl RootSmith {
     pub fn with_accumulator(mut self, accumulator: AccumulatorVariant) -> Self {
         self.accumulator = Some(Arc::new(tokio::sync::Mutex::new(accumulator)));
         self
-    }
-
-    pub async fn process_partner_data_to_zk(
-        &self,
-        partner_data: &[u8],
-        result_tx: AsyncSender<CommitmentResult>,
-    ) -> Result<()> {
-        let wasm_host = self
-            .wasm_host
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("WASM host not configured"))?;
-        let accumulator = self
-            .accumulator
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("Accumulator not configured"))?;
-
-        let mut host_guard = wasm_host.lock().await;
-        let output: Box<dyn ToStandardData> = host_guard.process_input(partner_data)?;
-
-        let key = output.key();
-        let value = output.value();
-
-        drop(host_guard);
-
-        let raw_record = RawRecord {
-            key,
-            value: value.to_vec(),
-        };
-
-        let mut acc_guard = accumulator.lock().await;
-        acc_guard.commit(&[raw_record], result_tx).await?;
-
-        Ok(())
-    }
-
-    pub async fn run(&mut self) -> Result<()> {
-        let (tx, rx) = unbounded_async();
-
-        info!("Opening upstream connector: {}", self.upstream.name());
-        self.upstream.open(tx).await?;
-
-        info!("RootSmith run loop started");
-        info!("Waiting for incoming data...");
-
-        while let Ok(data) = rx.recv().await {
-            match data {
-                UpstreamData::Raw(raw_bytes) => {
-                    info!("Received raw data ({} bytes)", raw_bytes.len());
-
-                    let (result_tx, result_rx) = unbounded_async();
-
-                    match self.process_partner_data_to_zk(&raw_bytes, result_tx).await {
-                        Ok(_) => {
-                            info!("Data processed through WASM → ZK accumulator");
-
-                            match result_rx.recv().await {
-                                Ok(result) => {
-                                    info!("Commitment result received");
-                                    info!("  Commitment: {} bytes", result.commitment.len());
-                                    info!("  Committed at: {}", result.committed_at);
-
-                                    if let Err(e) = self.downstream.handle(&result).await {
-                                        error!("Failed to send result to downstream: {}", e);
-                                    } else {
-                                        info!(
-                                            "Result sent to downstream: {}",
-                                            self.downstream.name()
-                                        );
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Failed to receive commitment result: {}", e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            error!("Failed to process data: {}", e);
-                        }
-                    }
-                }
-                UpstreamData::Record(record) => {
-                    warn!("Received IncomingRecord format - not processing (use /ingest/raw for partner data)");
-                }
-            }
-        }
-
-        info!("RootSmith run loop ended");
-        Ok(())
     }
 }
