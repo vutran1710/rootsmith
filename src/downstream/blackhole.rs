@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::traits::Downstream;
+use super::Downstream;
 use crate::types::CommitmentResult;
 
 /// Blackhole downstream that discards all data (no-op).
@@ -15,10 +15,6 @@ impl BlackholeDownstream {
 
 #[async_trait]
 impl Downstream for BlackholeDownstream {
-    fn name(&self) -> &'static str {
-        "blackhole"
-    }
-
     async fn handle(&self, _result: &CommitmentResult) -> Result<()> {
         // Discard all data
         Ok(())

@@ -1,8 +1,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::traits::ArchiveData;
-use crate::traits::ArchiveStorage;
+use super::ArchiveData;
+use super::ArchiveStorage;
 use crate::types::Namespace;
 
 /// S3 Glacier-based archive storage.
@@ -33,10 +33,6 @@ impl S3GlacierArchive {
 
 #[async_trait]
 impl ArchiveStorage for S3GlacierArchive {
-    fn name(&self) -> &'static str {
-        "s3-glacier"
-    }
-
     async fn archive(&self, _ns: Namespace, _timestamp: u64, data: ArchiveData) -> Result<String> {
         tracing::info!(
             "S3 Glacier: archiving data to bucket={} with prefix={}",

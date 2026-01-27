@@ -12,7 +12,7 @@ use monotree::Monotree;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::traits::Accumulator;
+use super::Accumulator;
 use crate::types::Commitment;
 use crate::types::CommitmentResult;
 use crate::types::Key32;
@@ -72,10 +72,6 @@ impl Default for SparseMerkleAccumulator {
 
 #[async_trait]
 impl Accumulator for SparseMerkleAccumulator {
-    fn accumulator_type(&self) -> crate::config::AccumulatorType {
-        crate::config::AccumulatorType::SparseMerkle
-    }
-
     async fn commit(
         &self,
         records: &[Record],

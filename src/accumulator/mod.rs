@@ -12,10 +12,26 @@ use serde::Deserialize;
 use serde::Serialize;
 use sparse_merkle_accumulator::SparseMerkleAccumulator;
 
-use crate::config::AccumulatorType;
-use crate::traits::Accumulator;
 use crate::types::CommitmentResult;
 use crate::types::Record;
+use crate::AccumulatorType;
+
+/// The accumulator is a blackbox module that handles batch processing of records.
+/// It produces commitment results that are delivered asynchronously via channels,
+/// supporting scenarios where commitment may take hours (e.g., external services).
+#[async_trait]
+pub trait Accumulator: Send + Sync {
+    /// Identifier for logging/telemetry (e.g. "merkle", "sparse-merkle").
+    fn name(&self) -> &'static str {
+        unimplemented!()
+    }
+
+    async fn commit(
+        &self,
+        records: &[Record],
+        result_tx: AsyncSender<CommitmentResult>,
+    ) -> Result<()>;
+}
 
 /// Enum representing all possible accumulator implementations.
 pub enum AccumulatorVariant {
@@ -50,11 +66,11 @@ impl AccumulatorVariant {
 
 #[async_trait]
 impl Accumulator for AccumulatorVariant {
-    fn accumulator_type(&self) -> AccumulatorType {
+    fn name(&self) -> &'static str {
         match self {
-            AccumulatorVariant::Merkle(_) => AccumulatorType::Merkle,
-            AccumulatorVariant::SparseMerkle(_) => AccumulatorType::SparseMerkle,
-            AccumulatorVariant::External(_) => AccumulatorType::External,
+            AccumulatorVariant::Merkle(_) => "merkle",
+            AccumulatorVariant::SparseMerkle(_) => "sparse-merkle",
+            AccumulatorVariant::External(_) => "external",
         }
     }
 

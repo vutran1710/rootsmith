@@ -11,7 +11,7 @@ use rs_merkle::Hasher;
 use rs_merkle::MerkleTree as RsMerkleTree;
 use tokio::sync::Mutex;
 
-use crate::traits::Accumulator;
+use super::Accumulator;
 use crate::types::CommitmentResult;
 use crate::types::Key32;
 use crate::types::Record;
@@ -41,10 +41,6 @@ impl MerkleAccumulator {
 
 #[async_trait]
 impl Accumulator for MerkleAccumulator {
-    fn accumulator_type(&self) -> crate::config::AccumulatorType {
-        crate::config::AccumulatorType::Merkle
-    }
-
     async fn commit(
         &self,
         records: &[Record],

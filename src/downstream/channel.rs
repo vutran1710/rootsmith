@@ -1,29 +1,34 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use async_trait::async_trait;
+use kanal::AsyncReceiver;
 use kanal::AsyncSender;
+use tokio::sync::Mutex;
 
-use crate::traits::Downstream;
+use super::Downstream;
 use crate::types::CommitmentResult;
 
 /// Channel downstream that publishes commitment results to a kanal channel.
 pub struct ChannelDownstream {
-    sender: AsyncSender<CommitmentResult>,
+    tx: AsyncSender<CommitmentResult>,
+    pub rx: Arc<Mutex<AsyncReceiver<CommitmentResult>>>,
 }
 
-impl ChannelDownstream {
-    pub fn new(sender: AsyncSender<CommitmentResult>) -> Self {
-        Self { sender }
+impl Default for ChannelDownstream {
+    fn default() -> Self {
+        let (tx, rx) = kanal::unbounded_async::<CommitmentResult>();
+        Self {
+            tx,
+            rx: Arc::new(Mutex::new(rx)),
+        }
     }
 }
 
 #[async_trait]
 impl Downstream for ChannelDownstream {
-    fn name(&self) -> &'static str {
-        "channel"
-    }
-
     async fn handle(&self, result: &CommitmentResult) -> Result<()> {
-        self.sender
+        self.tx
             .send(result.clone())
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send to channel: {}", e))?;

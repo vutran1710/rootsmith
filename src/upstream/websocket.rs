@@ -12,7 +12,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
 
-use crate::traits::UpstreamConnector;
+use super::UpstreamConnector;
 use crate::types::UpstreamData;
 
 type Connection = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -67,10 +67,6 @@ impl WebSocketSource {
 
 #[async_trait]
 impl UpstreamConnector for WebSocketSource {
-    fn upstream_type(&self) -> crate::upstream::variant::UpstreamType {
-        crate::upstream::variant::UpstreamType::WebSocket
-    }
-
     async fn open(&self, tx: AsyncSender<UpstreamData>) -> Result<()> {
         let url = format!("ws://localhost:{}", self.port);
         tracing::info!("Opening WebSocket connection: {}", url);

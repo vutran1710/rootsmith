@@ -4,8 +4,8 @@ use std::sync::atomic::AtomicBool;
 use anyhow::Result;
 use async_trait::async_trait;
 
-use crate::traits::ArchiveData;
-use crate::traits::ArchiveStorage;
+use super::ArchiveData;
+use super::ArchiveStorage;
 use crate::types::Namespace;
 
 /// File system-based archive storage.
@@ -26,10 +26,6 @@ impl FileArchive {
 
 #[async_trait]
 impl ArchiveStorage for FileArchive {
-    fn name(&self) -> &'static str {
-        "file-archive"
-    }
-
     async fn archive(&self, _ns: Namespace, _timestamp: u64, data: ArchiveData) -> Result<String> {
         tracing::info!("File archive: would archive data {:?}", data);
         todo!("Implement file archiving logic");

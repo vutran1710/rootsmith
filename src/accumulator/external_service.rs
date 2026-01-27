@@ -7,8 +7,7 @@ use reqwest::header::HeaderMap;
 use serde::Deserialize;
 use serde::Serialize;
 
-use crate::config::AccumulatorType;
-use crate::traits::Accumulator;
+use super::Accumulator;
 use crate::types::CommitmentResult;
 use crate::types::Record;
 use crate::utils::HttpClient;
@@ -19,7 +18,7 @@ pub enum Transport {
 }
 
 #[derive(Clone, Serialize, Deserialize)]
-pub enum WireProtocol {
+pub enum WireFormat {
     Protobuf,
 }
 
@@ -38,12 +37,12 @@ pub enum TransportConfig {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct ExternalServiceConfig {
     pub transport: TransportConfig,
-    pub wire_protocol: WireProtocol,
+    pub wire_format: WireFormat,
 }
 
 pub struct ExternalServiceAccumulator {
     transport: Transport,
-    wire_protocol: WireProtocol,
+    wire_format: WireFormat,
     config: ExternalServiceConfig,
 }
 
@@ -65,7 +64,7 @@ impl ExternalServiceAccumulator {
 
         Self {
             transport,
-            wire_protocol: config.wire_protocol.clone(),
+            wire_format: config.wire_format.clone(),
             config,
         }
     }
@@ -78,17 +77,13 @@ struct ResponseProtobufMessage {
 
 #[async_trait]
 impl Accumulator for ExternalServiceAccumulator {
-    fn accumulator_type(&self) -> AccumulatorType {
-        AccumulatorType::External
-    }
-
     async fn commit(
         &self,
         records: &[Record],
         _result_tx: AsyncSender<CommitmentResult>,
     ) -> Result<()> {
-        match (&self.transport, &self.wire_protocol) {
-            (Transport::Http(ref client), &WireProtocol::Protobuf) => {
+        match (&self.transport, &self.wire_format) {
+            (Transport::Http(ref client), &WireFormat::Protobuf) => {
                 tracing::info_span!("ExternalServiceAccumulator::commit");
 
                 // TODO: this is not correct, but just a placeholder for now
@@ -117,7 +112,10 @@ impl Accumulator for ExternalServiceAccumulator {
 
                 tracing::info!("Submitted job to external service: job_id={}", job_id);
 
-                /// TODO: register job_id to track status and get commitment result later
+                // TODO: register job_id to track status and get commitment result later
+                // There are different ways to handle this, such as:
+                // 1. Spawn a short-lived webserver to receive webhook callbacks from the external service
+                // 2. Use the main webserver to handle webhook callbacks (requires coordination with other parts of the system)
                 Ok(())
             }
         }
