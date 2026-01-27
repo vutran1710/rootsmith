@@ -44,6 +44,25 @@ pub struct Record {
     pub timestamp: u64,
 }
 
+impl Record {
+    pub const MAX_ENCODED_BYTES: usize = 4 * 1024 * 1024; // adjust
+
+    /// Serialize this record to bytes using postcard.
+    pub fn to_postcard_bytes(&self) -> Result<Vec<u8>, postcard::Error> {
+        postcard::to_allocvec(self)
+    }
+
+    /// Deserialize record from postcard bytes.
+    /// Enforces a max size to avoid corrupted/hostile blobs.
+    pub fn from_postcard_bytes(bytes: &[u8]) -> Result<Self, postcard::Error> {
+        if bytes.len() > Self::MAX_ENCODED_BYTES {
+            // postcard::Error doesn't have a great "custom" variant; pick a generic error.
+            return Err(postcard::Error::DeserializeBadEncoding);
+        }
+        postcard::from_bytes(bytes)
+    }
+}
+
 /// A commitment produced by the system for a batch of leaves
 /// belonging to a single namespace and time window.
 #[derive(Debug, Clone, Serialize, Deserialize)]

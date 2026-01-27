@@ -37,7 +37,7 @@ thiserror = "2"
 wasmer = "4"
 wasmer-compiler-cranelift = "4"
 arrow = "57.2.0"
-tempfile = "3"
+postcard = { version = "1.1.3", features = ["alloc"] }
 # optional future deps:
 # rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
 

@@ -12,7 +12,7 @@ pub trait PluginOutputTrait: 'static {
 }
 
 pub trait ToStandardData: RecordMeta {
-    fn value(&self) -> [u8; 32];
+    fn value(&self) -> Vec<u8>;
 }
 
 impl PluginOutputTrait for dyn ToStandardData {

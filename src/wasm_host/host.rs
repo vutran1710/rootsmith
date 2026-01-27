@@ -9,8 +9,7 @@ use wasmer::Store;
 use wasmer::TypedFunction;
 use wasmer_compiler_cranelift::Cranelift;
 
-use crate::parser::proto::parse_proto_message;
-use crate::types::IncomingRecord;
+use crate::types::Record;
 use crate::wasm_host::error::WasmHostError;
 use crate::wasm_host::limits::WasmLimits;
 use crate::wasm_host::wrapper::detect_and_parse;
@@ -51,7 +50,7 @@ impl WasmPluginHost {
     /// - Returns error if plugin is missing required exports (memory, alloc, process)
     /// - Returns error if plugin memory exceeds limits
     /// - Returns error if plugin has no memory maximum declared
-    pub fn load(path: &str, limits: WasmLimits) -> Result<Self> {
+    pub fn load(path: &str, limits: Option<WasmLimits>) -> Result<Self> {
         let engine: Engine = Cranelift::default().into();
         let mut store = Store::new(engine);
 
@@ -88,12 +87,12 @@ impl WasmPluginHost {
             .ok();
 
         // Validate memory limits
-        Self::validate_memory_limits(&memory, &store, &limits)?;
+        Self::validate_memory_limits(&memory, &store, &limits.clone().unwrap_or_default())?;
 
         Ok(Self {
             store,
             memory,
-            limits,
+            limits: limits.unwrap_or_default(),
             alloc,
             process,
             dealloc,
@@ -203,8 +202,8 @@ impl WasmPluginHost {
 
     pub fn process_to_record(&mut self, input: &[u8]) -> Result<IncomingRecord> {
         let payload = self.process_bytes(input)?;
-        parse_proto_message(&payload).map_err(|e| {
-            WasmHostError::PluginError(format!("Failed to parse protobuf: {}", e)).into()
+        Record::from_postcard_bytes(&payload).map_err(|e| {
+            WasmHostError::PluginError(format!("Failed to parse Record: {}", e)).into()
         })
     }
 

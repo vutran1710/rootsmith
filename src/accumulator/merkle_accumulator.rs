@@ -12,10 +12,10 @@ use rs_merkle::MerkleTree as RsMerkleTree;
 use tokio::sync::Mutex;
 
 use super::Accumulator;
+use crate::types::Commitment;
 use crate::types::CommitmentResult;
 use crate::types::Key32;
 use crate::types::Record;
-use crate::types::Commitment;
 
 #[derive(Default)]
 pub struct MerkleAccumulator {

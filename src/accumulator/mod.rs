@@ -39,7 +39,7 @@ pub enum AccumulatorVariant {
     External(ExternalServiceAccumulator),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum AccumulatorConfig {
     Merkle,
     SparseMerkle,

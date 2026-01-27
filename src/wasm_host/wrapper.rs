@@ -1,7 +1,7 @@
 use serde_json;
 
-use crate::parser::proto::parse_proto_message;
-use crate::types::IncomingRecord;
+use crate::types::Record;
+use crate::types::UpstreamData;
 use crate::wasm_host::traits::RecordMeta;
 use crate::wasm_host::traits::ToCustomJsonData;
 use crate::wasm_host::traits::ToExtendedData;
@@ -15,7 +15,7 @@ use crate::wasm_host::traits::ToStandardData;
 pub struct StandardWrapper {
     pub namespace: [u8; 32],
     pub key: [u8; 32],
-    pub value: [u8; 32],
+    pub value: UpstreamData,
     pub timestamp: u64,
 }
 
@@ -34,8 +34,8 @@ impl RecordMeta for StandardWrapper {
 }
 
 impl ToStandardData for StandardWrapper {
-    fn value(&self) -> [u8; 32] {
-        self.value
+    fn value(&self) -> Vec<u8> {
+        self.value.as_bytes()
     }
 }
 
@@ -146,7 +146,7 @@ impl ToRawData for RawWrapper {
 /// Returns the appropriate wrapper type based on the bytes.
 pub fn detect_and_parse(bytes: Vec<u8>) -> Result<PluginOutputWrapper, String> {
     // Try protobuf first (Standard format)
-    if let Ok(record) = parse_proto_message(&bytes) {
+    if let Ok(record) = Record::from_postcard_bytes(&bytes) {
         return Ok(PluginOutputWrapper::Standard(StandardWrapper::from(record)));
     }
 
