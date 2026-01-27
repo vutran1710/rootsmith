@@ -32,7 +32,7 @@ pub struct HttpTransportConfig {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub enum TransportConfig {
-    HttpConfig(HttpTransportConfig),
+    Http(HttpTransportConfig),
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -50,7 +50,7 @@ pub struct ExternalServiceAccumulator {
 impl ExternalServiceAccumulator {
     pub fn new(config: ExternalServiceConfig) -> Self {
         let transport = match &config.transport {
-            TransportConfig::HttpConfig(http_config) => {
+            TransportConfig::Http(http_config) => {
                 let headers = HeaderMap::from_iter(
                     http_config
                         .headers
@@ -99,7 +99,7 @@ impl Accumulator for ExternalServiceAccumulator {
                     .collect::<Vec<u8>>();
 
                 let endpoint = match &self.config.transport {
-                    TransportConfig::HttpConfig(http_config) => &http_config.endpoint,
+                    TransportConfig::Http(cfg) => &cfg.endpoint,
                 };
 
                 // TODO: register webhook URL or other metadata if needed with fields
