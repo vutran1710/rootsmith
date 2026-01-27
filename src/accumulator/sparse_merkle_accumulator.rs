@@ -43,7 +43,7 @@ impl SparseMerkleAccumulator {
         }
     }
 
-    /// leaf = H(key || value) (32 bytes)  -- dùng blake3 crate để hash bytes
+    /// leaf = H(key || value) (32 bytes)
     #[inline]
     fn leaf_hash(key: &Key32, value: &[u8]) -> Hash {
         let mut buf = Vec::with_capacity(key.len() + value.len());
