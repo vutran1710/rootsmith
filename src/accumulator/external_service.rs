@@ -10,31 +10,31 @@ use serde::Serialize;
 use super::Accumulator;
 use crate::types::CommitmentResult;
 use crate::types::Record;
+use crate::utils::http_client::MultipartValue;
 use crate::utils::HttpClient;
-use crate::MultipartValue;
 
 pub enum Transport {
     Http(HttpClient),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum WireFormat {
     Protobuf,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct HttpTransportConfig {
     pub base_url: String,
     pub headers: HashMap<String, String>,
     pub endpoint: String,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum TransportConfig {
     Http(HttpTransportConfig),
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct ExternalServiceConfig {
     pub transport: TransportConfig,
     pub wire_format: WireFormat,

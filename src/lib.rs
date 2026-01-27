@@ -4,7 +4,6 @@ pub mod accumulator;
 pub mod archiver;
 pub mod config;
 pub mod downstream;
-pub mod parser;
 pub mod rootsmith;
 pub mod storage;
 pub mod telemetry;
