@@ -43,6 +43,7 @@ pub enum ArchiveVariant {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ArchiveConfig {
     S3 {
         bucket: String,

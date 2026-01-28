@@ -40,6 +40,7 @@ pub enum AccumulatorVariant {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
+#[serde(rename_all = "snake_case")]
 pub enum AccumulatorConfig {
     Merkle,
     SparseMerkle,

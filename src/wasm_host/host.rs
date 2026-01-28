@@ -9,10 +9,11 @@ use wasmer::Store;
 use wasmer::TypedFunction;
 use wasmer_compiler_cranelift::Cranelift;
 
+use super::error::WasmHostError;
+use super::functions::read_memory_safe;
+use super::limits::WasmLimits;
 use crate::types::Record;
 use crate::types::UpstreamData;
-use crate::wasm_host::error::WasmHostError;
-use crate::wasm_host::limits::WasmLimits;
 
 /// WASM plugin host with sandboxing and resource limits
 pub struct WasmPluginHost {
@@ -43,7 +44,7 @@ impl WasmPluginHost {
     /// Load a WASM plugin from file with resource limits
     ///
     /// # Arguments
-    /// * `path` - Path to the .wasm file
+    /// * `path` - Path to .wasm file
     /// * `limits` - Resource limits (memory, response size)
     ///
     /// # Errors
@@ -54,7 +55,6 @@ impl WasmPluginHost {
         let engine: Engine = Cranelift::default().into();
         let mut store = Store::new(engine);
 
-        // Load and instantiate module with empty imports (no WASI, no FS, no network)
         let module = Module::from_file(&store, path)?;
         let instance = Instance::new(&mut store, &module, &imports! {})?;
 
@@ -201,10 +201,36 @@ impl WasmPluginHost {
     }
 
     pub fn process_to_record(&mut self, input: UpstreamData) -> Result<Record> {
-        let payload = self.process_bytes(&input.as_bytes())?;
+        let bytes = self.serialize_upstream_data(input)?;
+        let payload = self.process_bytes(&bytes)?;
         Record::from_postcard_bytes(&payload).map_err(|e| {
             WasmHostError::PluginError(format!("Failed to parse Record: {}", e)).into()
         })
+    }
+
+    fn serialize_upstream_data(&self, data: UpstreamData) -> Result<Vec<u8>> {
+        let mut buf = Vec::new();
+
+        match data {
+            UpstreamData::Bytes(b) => {
+                buf.push(0u8);
+                buf.extend_from_slice(&(b.len() as u32).to_le_bytes());
+                buf.extend_from_slice(&b);
+            }
+            UpstreamData::Json(v) => {
+                buf.push(1u8);
+                let bytes = serde_json::to_vec(&v)?;
+                buf.extend_from_slice(&(bytes.len() as u32).to_le_bytes());
+                buf.extend_from_slice(&bytes);
+            }
+            UpstreamData::Text(s) => {
+                buf.push(2u8);
+                buf.extend_from_slice(&(s.len() as u32).to_le_bytes());
+                buf.extend_from_slice(s.as_bytes());
+            }
+        }
+
+        Ok(buf)
     }
 
     /// Get a view of plugin memory
