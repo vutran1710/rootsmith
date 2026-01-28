@@ -10,9 +10,9 @@ use wasmer::TypedFunction;
 use wasmer_compiler_cranelift::Cranelift;
 
 use crate::types::Record;
+use crate::types::UpstreamData;
 use crate::wasm_host::error::WasmHostError;
 use crate::wasm_host::limits::WasmLimits;
-use crate::wasm_host::wrapper::detect_and_parse;
 
 /// WASM plugin host with sandboxing and resource limits
 pub struct WasmPluginHost {
@@ -181,7 +181,7 @@ impl WasmPluginHost {
             return Err(WasmHostError::ResponseTooLarge(len).into());
         }
 
-        // 6. Read payload
+        // 6. Read payload, ensure payload in postcard-compatible type
         let payload = self.read_memory(resp_ptr + 8, len)?;
 
         // 7. Deallocate response memory
@@ -200,23 +200,10 @@ impl WasmPluginHost {
         }
     }
 
-    pub fn process_to_record(&mut self, input: &[u8]) -> Result<Record> {
-        let payload = self.process_bytes(input)?;
+    pub fn process_to_record(&mut self, input: UpstreamData) -> Result<Record> {
+        let payload = self.process_bytes(&input.as_bytes())?;
         Record::from_postcard_bytes(&payload).map_err(|e| {
             WasmHostError::PluginError(format!("Failed to parse Record: {}", e)).into()
-        })
-    }
-
-    pub fn process_input<T>(&mut self, input: &[u8]) -> Result<Box<T>>
-    where
-        T: crate::wasm_host::traits::PluginOutputTrait + ?Sized,
-    {
-        let payload = self.process_bytes(input)?;
-        let wrapper = detect_and_parse(payload)
-            .map_err(|e| WasmHostError::PluginError(format!("Failed to detect format: {}", e)))?;
-
-        T::from_wrapper(wrapper).ok_or_else(|| {
-            WasmHostError::PluginError(format!("Output is not {} format", T::format_name())).into()
         })
     }
 

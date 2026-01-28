@@ -2,11 +2,6 @@ use serde_json;
 
 use crate::types::Record;
 use crate::types::UpstreamData;
-use crate::wasm_host::traits::RecordMeta;
-use crate::wasm_host::traits::ToCustomJsonData;
-use crate::wasm_host::traits::ToExtendedData;
-use crate::wasm_host::traits::ToRawData;
-use crate::wasm_host::traits::ToStandardData;
 
 /// Wrapper for Standard format (protobuf Record).
 ///
