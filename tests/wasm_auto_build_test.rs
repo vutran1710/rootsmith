@@ -1,8 +1,7 @@
 use rootsmith::accumulator::merkle_accumulator::MerkleAccumulator;
 use rootsmith::accumulator::Accumulator;
-use rootsmith::types::Record;
-use rootsmith::types::UpstreamData;
 use rootsmith::wasm_host::builder::get_or_build_plugin;
+use rootsmith::wasm_host::ParsedRecord;
 use rootsmith::wasm_host::PluginOutput;
 use rootsmith::wasm_host::WasmLimits;
 use rootsmith::wasm_host::WasmPluginHost;
@@ -46,13 +45,14 @@ async fn test_wasm_plugin_to_accumulator() {
     println!("  get_value():     {}", bytes_to_str(&output.get_value()));
     println!("  get_timestamp(): {}", output.get_timestamp());
 
-    // Convert to Record for accumulator
-    let record = Record {
+    // Convert to Record for accumulator (need ParsedRecord for into_record)
+    let parsed = ParsedRecord {
         namespace: output.get_namespace(),
         key: output.get_key(),
-        value: UpstreamData::Bytes(output.get_value().to_vec()),
+        value: output.get_value(),
         timestamp: output.get_timestamp(),
     };
+    let record = parsed.into_record();
 
     let accumulator = MerkleAccumulator::default();
     let (tx, rx) = kanal::bounded_async(1);

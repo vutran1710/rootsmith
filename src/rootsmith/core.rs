@@ -11,7 +11,6 @@ use crate::config::Config;
 use crate::downstream::DownstreamVariant;
 use crate::storage::Storage;
 use crate::types::Namespace;
-use crate::types::Value32;
 use crate::upstream::UpstreamVariant;
 use crate::wasm_host::WasmPluginHost;
 

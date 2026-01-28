@@ -1,4 +1,3 @@
-use crate::types::Namespace;
 use crate::types::Record;
 use crate::types::UpstreamData;
 
@@ -11,7 +10,7 @@ pub trait PluginOutput {
 
 #[derive(Debug, Clone)]
 pub struct ParsedRecord {
-    pub namespace: Namespace,
+    pub namespace: [u8; 32],
     pub key: [u8; 32],
     pub value: [u8; 32],
     pub timestamp: u64,
@@ -44,7 +43,7 @@ impl ParsedRecord {
         let mut timestamp = None;
 
         while offset < bytes.len() {
-            let tag = bytes.get(offset)?;
+            let tag = *bytes.get(offset)?;
             offset += 1;
 
             match tag {
@@ -99,11 +98,17 @@ impl ParsedRecord {
     }
 
     pub fn into_record(self) -> Record {
+        let mut ns16 = [0u8; 16];
+        let mut key16 = [0u8; 16];
+        ns16.copy_from_slice(&self.namespace[..16]);
+        key16.copy_from_slice(&self.key[..16]);
+
         Record {
-            namespace: self.namespace,
-            key: self.key,
+            namespace: ns16,
+            key: key16,
             value: UpstreamData::Bytes(self.value.to_vec()),
             timestamp: self.timestamp,
+            metadata: None,
         }
     }
 
