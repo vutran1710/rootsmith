@@ -201,10 +201,44 @@ impl WasmPluginHost {
     }
 
     pub fn process_to_record(&mut self, input: UpstreamData) -> Result<Record> {
+        // Serialize upstream data using the host's envelope format
         let bytes = self.serialize_upstream_data(input)?;
         let payload = self.process_bytes(&bytes)?;
-        Record::from_postcard_bytes(&payload).map_err(|e| {
-            WasmHostError::PluginError(format!("Failed to parse Record: {}", e)).into()
+
+        // The plugin encodes its own `Record` type defined in `rootsmith-plugin-sdk`,
+        // which has the following shape:
+        //
+        //     struct Record {
+        //         namespace: [u8; 16],
+        //         key: [u8; 16],
+        //         value: Vec<u8>,
+        //         timestamp: u64,
+        //         metadata: Option<Vec<u8>>,
+        //     }
+        //
+        // We define a local mirror of that type and then convert it into the
+        // host's `crate::types::Record`.
+        #[derive(serde::Deserialize)]
+        struct PluginRecord {
+            namespace: [u8; 16],
+            key: [u8; 16],
+            value: Vec<u8>,
+            timestamp: u64,
+            metadata: Option<Vec<u8>>,
+        }
+
+        let plugin_record: PluginRecord = postcard::from_bytes(&payload)
+            .map_err(|e| anyhow::anyhow!("Failed to parse plugin Record: {}", e))?;
+
+        // Map plugin record into the host's Record type.
+        Ok(Record {
+            namespace: plugin_record.namespace,
+            key: plugin_record.key,
+            value: UpstreamData::Bytes(plugin_record.value),
+            timestamp: plugin_record.timestamp,
+            metadata: plugin_record
+                .metadata
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok()),
         })
     }
 
