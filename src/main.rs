@@ -16,7 +16,8 @@ mod wasm_host;
 use config::Config;
 use rootsmith::RootSmith;
 
-fn main() -> Result<()> {
+#[tokio::main]
+async fn main() -> Result<()> {
     telemetry::init();
     info!("Starting rootsmith");
 
@@ -26,8 +27,8 @@ fn main() -> Result<()> {
     let rootsmith = RootSmith::initialize(config.clone()).await;
     tracing::info!("RootSmith initialized successfully");
 
-    return rootsmith.run().await.map_err(|e| {
+    rootsmith.run().await.map_err(|e| {
         tracing::error!("RootSmith encountered an error: {:?}", e);
         e
-    });
+    })
 }

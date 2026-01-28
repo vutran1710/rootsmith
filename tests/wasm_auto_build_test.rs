@@ -1,154 +1,72 @@
-//! Test to visualize the WASM auto-build flow
-//!
-//! Run with: cargo test --test wasm_auto_build_test -- --nocapture
-
-use rootsmith::wasm_host::builder::check_wasm_target;
+use rootsmith::accumulator::merkle_accumulator::MerkleAccumulator;
+use rootsmith::accumulator::Accumulator;
+use rootsmith::types::Record;
+use rootsmith::types::UpstreamData;
 use rootsmith::wasm_host::builder::get_or_build_plugin;
-use rootsmith::wasm_host::builder::install_wasm_target;
+use rootsmith::wasm_host::PluginOutput;
 use rootsmith::wasm_host::WasmLimits;
 use rootsmith::wasm_host::WasmPluginHost;
 
-#[test]
-fn test_auto_build_flow() {
-    println!("\n");
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║           WASM Auto-Build Flow Test                          ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
-    println!();
+fn bytes_to_str(bytes: &[u8]) -> String {
+    bytes
+        .iter()
+        .take_while(|&&b| b != 0 && b.is_ascii_graphic())
+        .map(|&b| b as char)
+        .collect()
+}
 
-    // Step 0: Check prerequisites
-    println!("┌─ Step 0: Check Prerequisites ─────────────────────────────────┐");
-    match check_wasm_target() {
-        Ok(true) => println!("│  [OK] wasm32-unknown-unknown target installed               │"),
-        Ok(false) => {
-            println!("│  [..] Installing wasm32-unknown-unknown target...            │");
-            install_wasm_target().expect("Failed to install wasm target");
-            println!("│  [OK] Target installed                                       │");
-        }
-        Err(e) => {
-            println!("│  [!!] Could not check target: {}                    │", e);
-        }
-    }
-    println!("└────────────────────────────────────────────────────────────────┘");
-    println!();
+#[tokio::test]
+async fn test_wasm_plugin_to_accumulator() {
+    println!("\n=== WASM Plugin → Accumulator ===\n");
 
-    // Step 1: Request plugin by filename
-    println!("┌─ Step 1: Request Plugin ──────────────────────────────────────┐");
-    println!("│  Input:  get_or_build_plugin(\"client.rs\")                     │");
-    println!("│                                                                │");
-    println!("│  Flow:                                                         │");
-    println!("│    plugins/input/client.rs  ──►  plugins/output/client.wasm   │");
-    println!("└────────────────────────────────────────────────────────────────┘");
-    println!();
+    let wasm_path = get_or_build_plugin("client.rs").expect("Failed to build");
+    println!("Plugin: {}", wasm_path.display());
 
-    let wasm_path = get_or_build_plugin("client.rs").expect("Failed to get or build plugin");
-
-    println!("┌─ Step 2: Build Result ────────────────────────────────────────┐");
-    println!("│  WASM path: {}│", format!("{:<43}", wasm_path.display()));
-    println!("│  Exists: {:<53}│", wasm_path.exists());
-    if let Ok(meta) = wasm_path.metadata() {
-        println!("│  Size: {:<55}│", format!("{} bytes", meta.len()));
-    }
-    println!("└────────────────────────────────────────────────────────────────┘");
-    println!();
-
-    assert!(wasm_path.exists(), "WASM file should exist after build");
-
-    // Step 3: Load the plugin
-    println!("┌─ Step 3: Load Plugin ─────────────────────────────────────────┐");
-    let limits = WasmLimits::default();
-    println!(
-        "│  Limits: max_memory={} pages, max_response={} bytes     │",
-        limits.max_memory_pages, limits.max_response_bytes
-    );
-
-    let mut host =
-        WasmPluginHost::load(wasm_path.to_str().unwrap(), limits).expect("Failed to load plugin");
-
-    println!("│  [OK] Plugin loaded successfully                             │");
+    let mut host = WasmPluginHost::load(
+        wasm_path.to_str().unwrap(),
+        Some(WasmLimits::default()),
+    )
+    .expect("Failed to load");
 
     if let Some((major, minor)) = host.api_version() {
-        println!("│  API Version: {}.{:<50}│", major, minor);
+        println!("Version: {}.{}", major, minor);
     }
-    println!("└────────────────────────────────────────────────────────────────┘");
-    println!();
 
-    // Step 4: Process test input
-    println!("┌─ Step 4: Process Input ───────────────────────────────────────┐");
-    let test_input =
-        r#"{"id":"evt-123","ts_ms":1700000000000,"user_id":"user-456","action":"click"}"#;
-    println!("│  Input JSON:                                                  │");
-    println!("│    {{                                                          │");
-    println!("│      \"id\": \"evt-123\",                                        │");
-    println!("│      \"ts_ms\": 1700000000000,                                  │");
-    println!("│      \"user_id\": \"user-456\",                                  │");
-    println!("│      \"action\": \"click\"                                       │");
-    println!("│    }}                                                          │");
-    println!("└────────────────────────────────────────────────────────────────┘");
-    println!();
+    // User input (arbitrary JSON)
+    let input = r#"{"id":"evt-123","ts_ms":1700000000000,"user_id":"user-456","action":"click"}"#;
+    println!("\nInput: {}", input);
 
-    let result = host
-        .process_bytes(test_input.as_bytes())
-        .expect("Failed to process input");
+    // Process returns trait - same methods user implemented in client.rs
+    let output: Box<dyn PluginOutput> = host.process(input.as_bytes()).expect("Failed to process");
 
-    println!("┌─ Step 5: Output ──────────────────────────────────────────────┐");
-    println!(
-        "│  Output size: {} bytes (protobuf-encoded IncomingRecord)     │",
-        result.len()
-    );
-    println!("│                                                                │");
-    println!("│  Parsed fields:                                                │");
+    // Use the trait methods (mirrors user's ToRecord/ToStandardData)
+    println!("\nOutput (via PluginOutput trait):");
+    println!("  get_namespace(): {}", bytes_to_str(&output.get_namespace()));
+    println!("  get_key():       {}", bytes_to_str(&output.get_key()));
+    println!("  get_value():     {}", bytes_to_str(&output.get_value()));
+    println!("  get_timestamp(): {}", output.get_timestamp());
 
-    // Parse the protobuf output to display fields
-    if result.len() >= 34 {
-        let namespace = &result[2..34];
-        let ns_str: String = namespace
-            .iter()
-            .take_while(|&&b| b != 0)
-            .map(|&b| b as char)
-            .collect();
-        println!("│    namespace: \"{:<46}│", format!("{}\"", ns_str));
-    }
-    if result.len() >= 68 {
-        let key = &result[36..68];
-        let key_str: String = key
-            .iter()
-            .take_while(|&&b| b != 0)
-            .map(|&b| b as char)
-            .collect();
-        println!("│    key:       \"{:<46}│", format!("{}\"", key_str));
-    }
-    if result.len() >= 102 {
-        let value = &result[70..102];
-        let val_str: String = value
-            .iter()
-            .take_while(|&&b| b != 0)
-            .map(|&b| b as char)
-            .collect();
-        println!("│    value:     \"{:<46}│", format!("{}\"", val_str));
-    }
-    println!("└────────────────────────────────────────────────────────────────┘");
-    println!();
+    // Convert to Record for accumulator
+    let record = Record {
+        namespace: output.get_namespace(),
+        key: output.get_key(),
+        value: UpstreamData::Bytes(output.get_value().to_vec()),
+        timestamp: output.get_timestamp(),
+    };
 
-    // Step 6: Verify rebuild skip
-    println!("┌─ Step 6: Rebuild Check ───────────────────────────────────────┐");
-    println!("│  Requesting same plugin again...                              │");
+    let accumulator = MerkleAccumulator::default();
+    let (tx, rx) = kanal::bounded_async(1);
 
-    let wasm_path2 = get_or_build_plugin("client.rs").expect("Failed to get plugin second time");
+    accumulator
+        .commit(&[record], tx)
+        .await
+        .expect("Failed to commit");
 
-    assert_eq!(wasm_path, wasm_path2);
-    println!("│  [OK] Same path returned (rebuild skipped - file unchanged)   │");
-    println!("└────────────────────────────────────────────────────────────────┘");
-    println!();
+    let result = rx.recv().await.expect("Failed to receive");
 
-    // Summary
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║                         SUMMARY                              ║");
-    println!("╠══════════════════════════════════════════════════════════════╣");
-    println!("║  Input:   plugins/input/client.rs                            ║");
-    println!("║  Output:  plugins/output/client.wasm                         ║");
-    println!("║  Build:   rustc --target wasm32-unknown-unknown              ║");
-    println!("║  Auto:    Rebuilds only if .rs newer than .wasm              ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
-    println!();
+    println!("\nAccumulator:");
+    println!("  root:  {}", hex::encode(&result.commitment.root));
+    println!("  items: {}", result.item_count);
+
+    println!("\n=== Done ===\n");
 }

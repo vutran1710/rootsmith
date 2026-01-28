@@ -9,22 +9,17 @@ use wasmer::Store;
 use wasmer::TypedFunction;
 use wasmer_compiler_cranelift::Cranelift;
 
-use crate::types::Record;
 use crate::wasm_host::error::WasmHostError;
 use crate::wasm_host::limits::WasmLimits;
-use crate::wasm_host::wrapper::detect_and_parse;
+use crate::wasm_host::parsed_record::ParsedRecord;
+use crate::wasm_host::parsed_record::PluginOutput;
 
-/// WASM plugin host with sandboxing and resource limits
 pub struct WasmPluginHost {
     store: Store,
     memory: Memory,
     limits: WasmLimits,
-
-    // Required exports
     alloc: TypedFunction<i32, i32>,
-    process: TypedFunction<(i32, i32), i32>,
-
-    // Optional exports
+    process_fn: TypedFunction<(i32, i32), i32>,
     dealloc: Option<TypedFunction<(i32, i32), ()>>,
     get_api_version: Option<TypedFunction<(), i32>>,
 }
@@ -40,25 +35,13 @@ impl std::fmt::Debug for WasmPluginHost {
 }
 
 impl WasmPluginHost {
-    /// Load a WASM plugin from file with resource limits
-    ///
-    /// # Arguments
-    /// * `path` - Path to the .wasm file
-    /// * `limits` - Resource limits (memory, response size)
-    ///
-    /// # Errors
-    /// - Returns error if plugin is missing required exports (memory, alloc, process)
-    /// - Returns error if plugin memory exceeds limits
-    /// - Returns error if plugin has no memory maximum declared
     pub fn load(path: &str, limits: Option<WasmLimits>) -> Result<Self> {
         let engine: Engine = Cranelift::default().into();
         let mut store = Store::new(engine);
 
-        // Load and instantiate module with empty imports (no WASI, no FS, no network)
         let module = Module::from_file(&store, path)?;
         let instance = Instance::new(&mut store, &module, &imports! {})?;
 
-        // Resolve required exports
         let memory = instance
             .exports
             .get_memory("memory")
@@ -70,12 +53,11 @@ impl WasmPluginHost {
             .get_typed_function::<i32, i32>(&store, "alloc")
             .map_err(|_| WasmHostError::MissingExport("alloc"))?;
 
-        let process = instance
+        let process_fn = instance
             .exports
             .get_typed_function::<(i32, i32), i32>(&store, "process")
             .map_err(|_| WasmHostError::MissingExport("process"))?;
 
-        // Resolve optional exports
         let dealloc = instance
             .exports
             .get_typed_function::<(i32, i32), ()>(&store, "dealloc")
@@ -86,7 +68,6 @@ impl WasmPluginHost {
             .get_typed_function::<(), i32>(&store, "get_api_version")
             .ok();
 
-        // Validate memory limits
         Self::validate_memory_limits(&memory, &store, &limits.clone().unwrap_or_default())?;
 
         Ok(Self {
@@ -94,20 +75,16 @@ impl WasmPluginHost {
             memory,
             limits: limits.unwrap_or_default(),
             alloc,
-            process,
+            process_fn,
             dealloc,
             get_api_version,
         })
     }
 
-    /// Validate that plugin memory has a maximum and it doesn't exceed limits
     fn validate_memory_limits(memory: &Memory, store: &Store, limits: &WasmLimits) -> Result<()> {
         let mem_type = memory.ty(store);
-
-        // Check if maximum is declared
         let max_pages = mem_type.maximum.ok_or(WasmHostError::NoMemoryMaximum)?;
 
-        // Check if maximum exceeds limit
         if max_pages.0 > limits.max_memory_pages {
             return Err(WasmHostError::MemoryLimitExceeded {
                 declared: max_pages.0,
@@ -119,78 +96,47 @@ impl WasmPluginHost {
         Ok(())
     }
 
-    /// Get the API version from the plugin (if exported)
-    ///
-    /// Returns (major, minor) encoded as (MAJOR << 16) | MINOR
     pub fn api_version(&mut self) -> Option<(u16, u16)> {
         let f = self.get_api_version.as_ref()?;
         let v = f.call(&mut self.store).ok()? as u32;
         Some(((v >> 16) as u16, (v & 0xFFFF) as u16))
     }
 
-    /// Process input bytes through the plugin and return raw output bytes
-    ///
-    /// This is the main entry point for executing the plugin:
-    /// 1. Allocates memory in plugin
-    /// 2. Writes input bytes
-    /// 3. Calls process()
-    /// 4. Reads response header (status + length)
-    /// 5. Reads response payload
-    /// 6. Deallocates memory (if plugin provides dealloc)
-    ///
-    /// # Process() Return Layout
-    ///
-    /// The pointer returned by process() must point to:
-    /// ```text
-    /// [u32 status][u32 len][u8 payload...]
-    /// ```
-    ///
-    /// - status = 0 → success, payload is output bytes
-    /// - status = 1 → error, payload is UTF-8 error string
-    ///
-    /// # Returns
-    /// Raw payload bytes from the plugin
-    ///
-    /// # Errors
-    /// - Returns `PluginError` if plugin returns status=1 with error message
-    /// - Returns `ResponseTooLarge` if response exceeds max_response_bytes
-    /// - Returns `PluginTrap` for runtime traps
-    pub fn process_bytes(&mut self, input: &[u8]) -> Result<Vec<u8>> {
-        // 1. Allocate memory in plugin
+    pub fn process(&mut self, input: &[u8]) -> Result<Box<dyn PluginOutput>> {
+        let bytes = self.process_bytes(input)?;
+        let record = ParsedRecord::from_protobuf(&bytes)
+            .ok_or_else(|| WasmHostError::PluginError("Failed to parse output".to_string()))?;
+        Ok(Box::new(record))
+    }
+
+    fn process_bytes(&mut self, input: &[u8]) -> Result<Vec<u8>> {
         let in_ptr = self
             .alloc
             .call(&mut self.store, input.len() as i32)
             .map_err(|e| WasmHostError::PluginTrap(e.to_string()))?;
 
-        // 2. Write input to plugin memory
         self.write_memory(in_ptr, input)?;
 
-        // 3. Call process()
         let resp_ptr = self
-            .process
+            .process_fn
             .call(&mut self.store, in_ptr, input.len() as i32)
             .map_err(|e| WasmHostError::PluginTrap(e.to_string()))?;
 
-        // 4. Read response header: [u32 status][u32 len]
         let hdr = self.read_memory(resp_ptr, 8)?;
         let status = u32::from_le_bytes(hdr[0..4].try_into().unwrap());
         let len = u32::from_le_bytes(hdr[4..8].try_into().unwrap()) as usize;
 
-        // 5. Enforce response size limit
         if len > self.limits.max_response_bytes {
             return Err(WasmHostError::ResponseTooLarge(len).into());
         }
 
-        // 6. Read payload
         let payload = self.read_memory(resp_ptr + 8, len)?;
 
-        // 7. Deallocate response memory
         if let Some(dealloc) = &self.dealloc {
             let total = (8 + len) as i32;
             let _ = dealloc.call(&mut self.store, resp_ptr, total);
         }
 
-        // 8. Handle response status
         match status {
             0 => Ok(payload),
             1 => Err(
@@ -200,35 +146,10 @@ impl WasmPluginHost {
         }
     }
 
-    pub fn process_to_record(&mut self, input: &[u8]) -> Result<IncomingRecord> {
-        let payload = self.process_bytes(input)?;
-        Record::from_postcard_bytes(&payload).map_err(|e| {
-            WasmHostError::PluginError(format!("Failed to parse Record: {}", e)).into()
-        })
-    }
-
-    pub fn process_input<T>(&mut self, input: &[u8]) -> Result<Box<T>>
-    where
-        T: crate::wasm_host::traits::PluginOutputTrait + ?Sized,
-    {
-        let payload = self.process_bytes(input)?;
-        let wrapper = detect_and_parse(payload)
-            .map_err(|e| WasmHostError::PluginError(format!("Failed to detect format: {}", e)))?;
-
-        T::from_wrapper(wrapper).ok_or_else(|| {
-            WasmHostError::PluginError(format!("Output is not {} format", T::format_name())).into()
-        })
-    }
-
-    /// Get a view of plugin memory
     fn mem_view(&self) -> MemoryView<'_> {
         self.memory.view(&self.store)
     }
 
-    /// Write bytes to plugin memory at the given pointer
-    ///
-    /// # Errors
-    /// Returns error if write would exceed memory bounds
     fn write_memory(&mut self, ptr: i32, data: &[u8]) -> Result<()> {
         let view = self.mem_view();
         let start = ptr as u64;
@@ -244,10 +165,6 @@ impl WasmPluginHost {
         Ok(())
     }
 
-    /// Read bytes from plugin memory at the given pointer
-    ///
-    /// # Errors
-    /// Returns error if read would exceed memory bounds
     fn read_memory(&mut self, ptr: i32, len: usize) -> Result<Vec<u8>> {
         let view = self.mem_view();
         let start = ptr as u64;

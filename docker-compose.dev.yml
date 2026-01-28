@@ -13,10 +13,10 @@ services:
       - RUST_BACKTRACE=1
     volumes:
       - ./data:/app/data
-      - ./tests:/app/tests
+      - ./plugins:/app/plugins
     command: >
       rootsmith
-      --wasm-plugin-path tests/plugins/client.wasm
+      --wasm-plugin-path plugins/output/client.wasm
       --zk-service-url http://host.docker.internal:3000
       --upstream-bind 0.0.0.0:8000
     extra_hosts:

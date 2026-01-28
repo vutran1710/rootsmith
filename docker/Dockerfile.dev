@@ -38,10 +38,11 @@ COPY --from=builder /app/target/release/rootsmith /usr/local/bin/rootsmith
 
 # Copy test data and plugins (for development)
 COPY tests/data ./tests/data
-COPY tests/plugins ./tests/plugins
+COPY plugins/input ./plugins/input
+COPY plugins/output ./plugins/output
 
 # Expose port
 EXPOSE 8000
 
 # Default command
-CMD ["rootsmith", "--wasm-plugin-path", "tests/plugins/client.wasm"]
+CMD ["rootsmith", "--wasm-plugin-path", "plugins/output/client.wasm"]
