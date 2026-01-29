@@ -10,9 +10,12 @@ use rootsmith::wasm_host::{WasmBuilder, WasmLimits, WasmPluginHost};
 fn test_wasm_build_and_process() -> Result<()> {
     println!("\n=== WASM Plugin Test ===\n");
 
+    // CARGO_MANIFEST_DIR is rootsmith/, go up 1 level to workspace root
+    let workspace_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+
     // 1. Build
-    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/plugin/src/lib.rs");
-    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/output");
+    let source = workspace_root.join("examples/plugin/src/lib.rs");
+    let output = workspace_root.join("examples/output");
 
     let wasm_path = WasmBuilder::build(&source, &output)?;
     println!("Built: {} -> {}", source.display(), wasm_path.display());

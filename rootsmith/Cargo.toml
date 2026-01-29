@@ -1,0 +1,66 @@
+[package]
+name = "rootsmith"
+version = "0.1.0"
+edition = "2021"
+description = "Cryptographic accumulator app with RocksDB, pluggable backends and registries"
+license = "MIT"
+
+[dependencies]
+# Internal crates
+rootsmith-wasm-host = { path = "../rootsmith-wasm-host" }
+
+# Core
+anyhow = "1"
+base64 = "0.22"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+# Storage
+rocksdb = "0.22"
+
+# Async
+tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
+tokio-util = { version = "0.7", features = ["io"] }
+futures-util = "0.3"
+async-trait = "0.1"
+kanal = "0.1.0-pre8"
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "multipart"] }
+hyper = { version = "0.14", features = ["server", "client", "http1", "tcp"] }
+
+# Crypto
+rs_merkle = "1.5.0"
+monotree = "0.4.0"
+hex = "0.4"
+sha2 = "0.10"
+blake3 = "1"
+
+# Serialization
+prost = "0.13"
+prost-types = "0.13"
+postcard = { version = "1.1.3", features = ["alloc"] }
+toml = "0.8"
+
+# Utils
+uuid = { version = "1", features = ["serde", "v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+arrow = "57.2.0"
+tempfile = "3"
+
+# Telemetry
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+opentelemetry = { version = "0.24", features = ["trace"] }
+tracing-opentelemetry = "0.27"
+
+[build-dependencies]
+prost-build = "0.13"
+
+[dev-dependencies]
+criterion = "0.5"
+rand = "0.8"
+wat = "1"

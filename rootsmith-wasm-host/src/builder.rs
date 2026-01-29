@@ -177,33 +177,3 @@ impl WasmBuilder {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::UpstreamData;
-    use crate::wasm_host::WasmPluginHost;
-
-    #[test]
-    fn test_build_from_source_file() {
-        let wasm_path = WasmBuilder::build("examples/plugin/src/lib.rs", "examples/output")
-            .expect("Failed to build");
-        assert!(wasm_path.ends_with("lib.wasm"));
-
-        let mut host = WasmPluginHost::load(wasm_path.to_str().unwrap(), None)
-            .expect("Failed to load");
-
-        let input = serde_json::json!({
-            "user_id": "user_123",
-            "event_type": "login",
-            "timestamp": 1706500000u64,
-            "data": "test"
-        });
-
-        let record = host
-            .process_to_record(UpstreamData::Json(input))
-            .expect("Failed to process");
-
-        assert!(!record.namespace.is_empty());
-        assert!(!record.key.is_empty());
-    }
-}

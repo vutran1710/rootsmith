@@ -1,5 +1,3 @@
-[workspace]
-
 [package]
 name = "rootsmith-plugin-sdk"
 version = "0.1.0"

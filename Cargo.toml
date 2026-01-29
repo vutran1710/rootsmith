@@ -1,57 +1,19 @@
-[package]
-name = "rootsmith"
+[workspace]
+resolver = "2"
+members = [
+    "rootsmith",
+    "rootsmith-wasm-host",
+    "rootsmith-plugin-sdk",
+    "examples/plugin",
+]
+
+# Exclude no_std crates from default build (they require wasm32 target)
+default-members = [
+    "rootsmith",
+    "rootsmith-wasm-host",
+]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2021"
-description = "Cryptographic accumulator app with RocksDB, pluggable backends and registries"
 license = "MIT"
-
-[dependencies]
-anyhow = "1"
-base64 = "0.22"
-clap = { version = "4", features = ["derive"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-rocksdb = "0.22"
-kanal = "0.1.0-pre8"
-uuid = { version = "1", features = ["serde", "v4"] }
-reqwest = { version = "0.12", features = ["json", "multipart"] }
-chrono = { version = "0.4", features = ["serde"] }
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
-opentelemetry = { version = "0.24", features = ["trace"] }
-tracing-opentelemetry = "0.27"
-tokio = { version = "1", features = ["full"] }
-tokio-tungstenite = "0.24"
-tokio-util = { version = "0.7", features = ["io"] }
-futures-util = "0.3"
-async-trait = "0.1"
-hyper = { version = "0.14", features = ["server", "client", "http1", "tcp"] }
-rs_merkle = "1.5.0"
-monotree = "0.4.0"
-hex = "0.4"
-sha2 = "0.10"
-blake3 = "1"
-prost = "0.13"
-prost-types = "0.13"
-thiserror = "2"
-wasmer = "4"
-wasmer-compiler-cranelift = "4"
-arrow = "57.2.0"
-postcard = { version = "1.1.3", features = ["alloc"] }
-tempfile = "3"
-toml = "0.8"
-# optional future deps:
-# rdkafka, aws-sdk-s3, aws-sdk-sqs, mqtt clients, websockets, etc.
-
-[build-dependencies]
-prost-build = "0.13"
-
-[dev-dependencies]
-criterion = "0.5"
-anyhow = "1"
-rand = "0.8"
-wat = "1"
-
-# [[bench]]
-# name = "prove_10k"
-# harness = false
