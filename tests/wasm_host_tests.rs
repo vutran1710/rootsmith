@@ -3,62 +3,50 @@ use std::path::Path;
 use anyhow::Result;
 use serde_json::json;
 
-use rootsmith::types::{Record, UpstreamData};
-use rootsmith::wasm_host::{WasmLimits, WasmPluginHost};
+use rootsmith::types::UpstreamData;
+use rootsmith::wasm_host::{WasmBuilder, WasmLimits, WasmPluginHost};
 
-/// E2E test: load the example WASM plugin, send a JSON event through the host,
-/// decode it to a `Record`, and print the result.
-///
-/// This test assumes you have already built the plugin:
-///
-/// ```bash
-/// cargo build --manifest-path examples/plugin/Cargo.toml --target wasm32-unknown-unknown --release \
-///   && mkdir -p examples/output \
-///   && cp examples/plugin/target/wasm32-unknown-unknown/release/example_parser_plugin.wasm examples/output/lib.wasm
-/// ```
 #[test]
-fn test_wasm_plugin_parses_record_and_prints() -> Result<()> {
-    // Locate the built plugin
-    let plugin_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("examples")
-        .join("output")
-        .join("lib.wasm");
+fn test_wasm_build_and_process() -> Result<()> {
+    println!("\n=== WASM Plugin Test ===\n");
 
-    if !plugin_path.exists() {
-        panic!(
-            "WASM plugin not found at {:?}. \
-             Please build it with:\n\
-             \n  cargo build --manifest-path examples/plugin/Cargo.toml --target wasm32-unknown-unknown --release \\\n  \\\n  && mkdir -p examples/output \\\n  && cp examples/plugin/target/wasm32-unknown-unknown/release/example_parser_plugin.wasm examples/output/lib.wasm\n",
-            plugin_path
-        );
+    // 1. Build
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/plugin/src/lib.rs");
+    let output = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/output");
+
+    let wasm_path = WasmBuilder::build(&source, &output)?;
+    println!("Built: {} -> {}", source.display(), wasm_path.display());
+
+    // 2. Load
+    let mut host = WasmPluginHost::load(wasm_path.to_str().unwrap(), Some(WasmLimits::default()))?;
+    if let Some((major, minor)) = host.api_version() {
+        println!("Loaded: API v{}.{}", major, minor);
     }
 
-    // Load the plugin via the host
-    let mut host = WasmPluginHost::load(
-        plugin_path
-            .to_str()
-            .expect("Failed to convert plugin path to string"),
-        Some(WasmLimits::default()),
-    )?;
-
-    // Build a JSON event that matches `examples/plugin/src/lib.rs::UserEvent`
-    let event = json!({
+    // 3. Process
+    let input = json!({
         "user_id": "user-123",
         "event_type": "click",
         "timestamp": 1_700_000_000u64,
-        "data": "hello from wasm test"
+        "data": "hello"
     });
 
-    // Wrap the JSON into host UpstreamData and let the host handle the envelope
-    let upstream = UpstreamData::Json(event);
+    let record = host.process_to_record(UpstreamData::Json(input.clone()))?;
 
-    // Process through the plugin and decode to the host `Record`
-    let record = host
-        .process_to_record(upstream)
-        .expect("Failed to process record via WASM plugin");
+    let ns = String::from_utf8_lossy(&record.namespace);
+    let key = String::from_utf8_lossy(&record.key);
+    let value = match &record.value {
+        UpstreamData::Bytes(b) => String::from_utf8_lossy(b).to_string(),
+        _ => String::new(),
+    };
 
-    // Print the decoded record so you can inspect the output
-    println!("Decoded Record from WASM plugin:\n{:#?}", record);
+    println!("Input:  {}", input);
+    println!("Output: ns={:?} key={:?} value={:?}",
+        ns.trim_end_matches('\0'),
+        key.trim_end_matches('\0'),
+        value
+    );
 
+    println!("\n=== Done ===\n");
     Ok(())
 }

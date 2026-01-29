@@ -1,8 +1,10 @@
+pub mod builder;
 pub mod error;
 pub mod functions;
 pub mod host;
 pub mod limits;
 
+pub use builder::WasmBuilder;
 pub use error::WasmHostError;
 pub use functions::read_memory_safe;
 pub use functions::set_plugin_memory;
