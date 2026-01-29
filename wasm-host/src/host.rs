@@ -12,8 +12,8 @@ use wasmer_compiler_cranelift::Cranelift;
 use super::error::WasmHostError;
 use super::functions::read_memory_safe;
 use super::limits::WasmLimits;
-use crate::types::Record;
-use crate::types::UpstreamData;
+use types::Record;
+use types::UpstreamData;
 
 /// WASM plugin host with sandboxing and resource limits
 pub struct WasmPluginHost {

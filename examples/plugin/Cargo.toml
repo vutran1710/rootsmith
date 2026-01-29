@@ -7,5 +7,5 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-rootsmith-plugin-sdk = { path = "../../rootsmith-plugin-sdk" }
+plugin-sdk = { path = "../../plugin-sdk" }
 serde = { version = "1", default-features = false, features = ["derive"] }

@@ -2,15 +2,17 @@
 resolver = "2"
 members = [
     "rootsmith",
-    "rootsmith-wasm-host",
-    "rootsmith-plugin-sdk",
+    "types",
+    "wasm-host",
+    "plugin-sdk",
     "examples/plugin",
 ]
 
 # Exclude no_std crates from default build (they require wasm32 target)
 default-members = [
     "rootsmith",
-    "rootsmith-wasm-host",
+    "types",
+    "wasm-host",
 ]
 
 [workspace.package]

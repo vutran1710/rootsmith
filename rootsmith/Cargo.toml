@@ -7,7 +7,8 @@ license = "MIT"
 
 [dependencies]
 # Internal crates
-rootsmith-wasm-host = { path = "../rootsmith-wasm-host" }
+types = { path = "../types" }
+wasm-host = { path = "../wasm-host" }
 
 # Core
 anyhow = "1"

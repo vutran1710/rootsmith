@@ -11,8 +11,8 @@ pub mod types;
 pub mod upstream;
 pub mod utils;
 
-// Re-export rootsmith-wasm-host as wasm_host
-pub use rootsmith_wasm_host as wasm_host;
+// Re-export wasm-host as wasm_host
+pub use wasm_host;
 
 // Re-export commonly used types and traits
 pub use accumulator::AccumulatorVariant;
