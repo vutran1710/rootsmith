@@ -5,7 +5,7 @@ extern crate alloc;
 use alloc::format;
 use alloc::string::String;
 
-use rootsmith_plugin_sdk::*;
+use plugin_sdk::*;
 
 #[derive(Deserialize)]
 struct UserEvent {

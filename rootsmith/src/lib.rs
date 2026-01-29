@@ -10,10 +10,11 @@ pub mod telemetry;
 pub mod types;
 pub mod upstream;
 pub mod utils;
-pub mod wasm_host;
+
+// Re-export wasm-host as wasm_host
+pub use wasm_host;
 
 // Re-export commonly used types and traits
-// Re-export variant enums for convenience
 pub use accumulator::AccumulatorVariant;
 pub use archiver::ArchiveVariant;
 pub use config::Config;
@@ -23,12 +24,16 @@ pub use rootsmith::EpochPhase;
 pub use rootsmith::RootSmith;
 pub use storage::Storage;
 pub use types::Commitment;
-pub use types::Key16;
-pub use types::Namespace;
-pub use types::Record;
 pub use utils::HttpClient;
 pub use utils::HttpClientError;
 pub use utils::MultipartValue;
+
+// Re-export wasm_host types for convenience
+pub use wasm_host::Key16;
+pub use wasm_host::Namespace;
+pub use wasm_host::Record;
+pub use wasm_host::UpstreamData;
+pub use wasm_host::WasmBuilder;
 pub use wasm_host::WasmHostError;
 pub use wasm_host::WasmLimits;
 pub use wasm_host::WasmPluginHost;

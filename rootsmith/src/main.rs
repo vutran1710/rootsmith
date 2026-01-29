@@ -4,20 +4,9 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::info;
 
-mod accumulator;
-mod archiver;
-mod config;
-mod downstream;
-mod rootsmith;
-mod storage;
-mod telemetry;
-mod types;
-mod upstream;
-mod utils;
-mod wasm_host;
-
-use config::Config;
-use rootsmith::RootSmith;
+use rootsmith::config::Config;
+use rootsmith::rootsmith::RootSmith;
+use rootsmith::telemetry;
 
 #[derive(Parser, Debug)]
 #[command(name = "rootsmith")]

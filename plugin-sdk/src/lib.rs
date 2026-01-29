@@ -116,7 +116,7 @@ pub fn from_json<'a, T: Deserialize<'a>>(input: &'a [u8]) -> Result<T> {
         .map_err(|_| ParseError::JsonError)
 }
 
-pub fn deserialize_upstream_data(input: &[u8]) -> Result<UpstreamData> {
+pub fn deserialize_upstream_data(input: &[u8]) -> Result<UpstreamData<'_>> {
     if input.is_empty() {
         return Err(ParseError::InvalidValue);
     }
@@ -156,6 +156,9 @@ pub extern "C" fn alloc(size: usize) -> *mut u8 {
     }
 }
 
+// Only define panic handler when building for WASM (no_std environment)
+// When std is available, it provides its own panic handler
+#[cfg(target_arch = "wasm32")]
 #[panic_handler]
 fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}

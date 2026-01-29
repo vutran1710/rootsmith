@@ -2,7 +2,6 @@
 /target
 **/target
 Cargo.lock
-wasm_plugin_sdk_derive/Cargo.lock
 
 # WASM files (build outputs)
 *.wasm

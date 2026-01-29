@@ -1,3 +1,5 @@
+//! Shared types for rootsmith.
+
 use std::collections::HashMap;
 
 use serde::Deserialize;
