@@ -1,0 +1,13 @@
+storage_path = "./data"
+plugin_path = "examples/plugin/target/wasm32-unknown-unknown/release/example_parser_plugin.wasm"
+
+
+[upstream.http]
+port = 8080
+
+[accumulator.sparse_merkle]
+
+[archive.file]
+directory = "./archive"
+
+[downstream.blackhole]
