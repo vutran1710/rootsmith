@@ -11,6 +11,8 @@ use crate::config::Config;
 use crate::downstream::DownstreamVariant;
 use crate::storage::Storage;
 use crate::types::Namespace;
+use crate::types::UpstreamData;
+use crate::upstream::UpstreamConnector;
 use crate::upstream::UpstreamVariant;
 use crate::wasm_host::WasmPluginHost;
 
@@ -67,15 +69,15 @@ pub struct RootSmith {
 
 impl RootSmith {
     /// Initialize RootSmith with default Noop implementations.
-    pub async fn initialize(config: Config) -> Self {
+    pub async fn initialize(config: Config, wasm_path: std::path::PathBuf) -> Self {
         let storage = Storage::open(&config.storage_path).expect("Failed to open storage");
         tracing::info!("Storage opened at: {}", config.storage_path);
 
         let upstream = UpstreamVariant::new(config.upstream.clone());
         let downstream = DownstreamVariant::new(config.downstream.clone());
         let archive_storage = ArchiveVariant::new(config.archive.clone());
-        let wasm_host =
-            WasmPluginHost::load(&config.plugin_path, None).expect("Failed to load WASM plugins");
+        let wasm_host = WasmPluginHost::load(wasm_path.to_str().unwrap(), None)
+            .expect("Failed to load WASM plugin");
         let accumulator = AccumulatorVariant::new(&config.accumulator);
 
         Self {
@@ -98,7 +100,31 @@ impl RootSmith {
     }
 
     pub async fn run(&self) -> anyhow::Result<()> {
-        // Main run loop placeholder
-        Ok(())
+        let (tx, rx) = kanal::unbounded_async::<UpstreamData>();
+
+        self.upstream.open(tx).await?;
+        tracing::info!("Upstream started");
+
+        while let Ok(data) = rx.recv().await {
+            tracing::info!("Received: {:?}", data);
+
+            let mut wasm = self.wasm_host.lock().await;
+            match wasm.process_to_record(data) {
+                Ok(record) => {
+                    tracing::info!(
+                        "WASM output: ns={} key={}",
+                        hex::encode(&record.namespace[..8]),
+                        hex::encode(&record.key[..8])
+                    );
+
+                    let storage = self.storage.lock().await;
+                    storage.put(&record)?;
+                    tracing::info!("Stored in RocksDB");
+                }
+                Err(e) => tracing::error!("Plugin error: {}", e),
+            }
+        }
+
+        self.upstream.close().await
     }
 }

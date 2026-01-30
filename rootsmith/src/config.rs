@@ -10,7 +10,7 @@ pub struct Config {
 
     pub upstream: UpstreamConfig,
 
-    pub plugin_path: String,
+    pub source_path: String,
 
     pub accumulator: AccumulatorConfig,
 
@@ -22,7 +22,19 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        unimplemented!()
+        Self {
+            storage_path: "./data".to_string(),
+            source_path: "./examples/plugin/src/lib.rs".to_string(),
+            upstream: UpstreamConfig::Http {
+                port: 8080,
+                api_key: None,
+            },
+            accumulator: AccumulatorConfig::Merkle,
+            archive: ArchiveConfig::File {
+                directory: "./archive".to_string(),
+            },
+            downstream: DownstreamConfig::Blackhole,
+        }
     }
 }
 

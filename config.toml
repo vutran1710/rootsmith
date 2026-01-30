@@ -1,0 +1,12 @@
+storage_path = "./data"
+source_path = "./examples/plugin/src/client.rs"
+
+[upstream.http]
+port = 8080
+
+[accumulator.merkle]
+
+[archive.file]
+directory = "./archive"
+
+[downstream.blackhole]
