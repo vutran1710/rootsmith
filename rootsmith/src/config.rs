@@ -8,6 +8,8 @@ use crate::upstream::UpstreamConfig;
 pub struct Config {
     pub storage_path: String,
 
+    pub http_port: u16,
+
     pub upstream: UpstreamConfig,
 
     pub source_path: String,
@@ -24,6 +26,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             storage_path: "./data".to_string(),
+            http_port: 9000,
             source_path: "./examples/plugin/src/lib.rs".to_string(),
             upstream: UpstreamConfig::Http {
                 port: 8080,

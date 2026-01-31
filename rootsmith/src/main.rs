@@ -50,7 +50,7 @@ async fn main() -> Result<()> {
     let wasm_path = WasmBuilder::build(&source_path, &output_dir)?;
     info!("Built WASM plugin: {:?}", wasm_path);
 
-    let rootsmith = RootSmith::initialize(config, wasm_path).await;
+    let mut rootsmith = RootSmith::initialize(config, wasm_path).await;
     tracing::info!("RootSmith initialized successfully");
 
     return rootsmith.run().await.map_err(|e| {

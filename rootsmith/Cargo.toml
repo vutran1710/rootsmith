@@ -30,6 +30,7 @@ async-trait = "0.1"
 kanal = "0.1.0-pre8"
 
 # HTTP
+axum = "0.8"
 reqwest = { version = "0.12", features = ["json", "multipart"] }
 hyper = { version = "0.14", features = ["server", "client", "http1", "tcp"] }
 
@@ -64,4 +65,5 @@ prost-build = "0.13"
 [dev-dependencies]
 criterion = "0.5"
 rand = "0.8"
+tower = { version = "0.5", features = ["util"] }
 wat = "1"

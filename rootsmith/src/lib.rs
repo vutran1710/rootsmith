@@ -5,6 +5,7 @@ pub mod archiver;
 pub mod config;
 pub mod downstream;
 pub mod rootsmith;
+pub mod server;
 pub mod storage;
 pub mod telemetry;
 pub mod types;

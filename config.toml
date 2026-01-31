@@ -1,8 +1,9 @@
 storage_path = "./data"
+http_port = 9000
 source_path = "./examples/plugin/src/client.rs"
 
 [upstream.http]
-port = 8080
+port = 8000
 
 [accumulator.merkle]
 

@@ -9,6 +9,7 @@ use crate::accumulator::AccumulatorVariant;
 use crate::archiver::ArchiveVariant;
 use crate::config::Config;
 use crate::downstream::DownstreamVariant;
+use crate::server::{admin, Webserver};
 use crate::storage::Storage;
 use crate::types::Namespace;
 use crate::types::UpstreamData;
@@ -36,6 +37,9 @@ pub struct CommittedRecord {
 
 /// Main application orchestrator with epoch-based architecture.
 pub struct RootSmith {
+    /// HTTP server for admin endpoints.
+    pub webserver: Option<Webserver>,
+
     /// Upstream connector.
     pub upstream: UpstreamVariant,
 
@@ -73,6 +77,7 @@ impl RootSmith {
         let storage = Storage::open(&config.storage_path).expect("Failed to open storage");
         tracing::info!("Storage opened at: {}", config.storage_path);
 
+        let webserver = Webserver::new(config.http_port).register(admin::routes());
         let upstream = UpstreamVariant::new(config.upstream.clone());
         let downstream = DownstreamVariant::new(config.downstream.clone());
         let archive_storage = ArchiveVariant::new(config.archive.clone());
@@ -81,6 +86,7 @@ impl RootSmith {
         let accumulator = AccumulatorVariant::new(&config.accumulator);
 
         Self {
+            webserver: Some(webserver),
             upstream,
             downstream,
             archive_storage,
@@ -99,7 +105,12 @@ impl RootSmith {
         }
     }
 
-    pub async fn run(&self) -> anyhow::Result<()> {
+    pub async fn run(&mut self) -> anyhow::Result<()> {
+        // Start HTTP server
+        if let Some(webserver) = self.webserver.take() {
+            tokio::spawn(webserver.run());
+        }
+
         let (tx, rx) = kanal::unbounded_async::<UpstreamData>();
 
         self.upstream.open(tx).await?;
