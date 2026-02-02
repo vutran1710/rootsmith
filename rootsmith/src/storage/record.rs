@@ -1,3 +1,5 @@
+//! Record storage implementation using RocksDB.
+
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -129,11 +131,12 @@ impl From<StoredRecord> for Record {
     }
 }
 
-pub struct Storage {
+/// Storage for upstream records using RocksDB.
+pub struct RecordStorage {
     db: Arc<DB>,
 }
 
-impl Storage {
+impl RecordStorage {
     pub fn open(path: &str) -> Result<Self> {
         let mut opts = Options::default();
         opts.create_if_missing(true);

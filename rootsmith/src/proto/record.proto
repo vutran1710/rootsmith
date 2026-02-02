@@ -2,17 +2,16 @@ syntax = "proto3";
 
 package rootsmith;
 
-// IncomingRecord represents a data record to be ingested
 message Record {
-  // 32-byte namespace identifier
-    bytes namespace = 1;
+  bytes namespace = 1;
+  bytes key = 2;
+  bytes value = 3;
+  uint64 timestamp = 4;
+  optional string metadata = 5;
+}
 
-  // 32-byte key
-    bytes key = 2;
-
-  // 32-byte value
-    bytes value = 3;
-
-    // Unix timestamp in seconds
-    uint64 timestamp = 4;
+message Commitment {
+  repeated bytes namespaces = 1;
+  bytes root = 2;
+  uint64 committed_at = 3;
 }
