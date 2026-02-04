@@ -13,7 +13,7 @@ use crate::types::Namespace;
 use crate::types::Record;
 use crate::types::UpstreamData;
 
-const RECORD_PREFIX: u8 = 0x01;
+use super::RECORD_PREFIX;
 
 mod key_layout {
     pub const PREFIX_SIZE: usize = 1;

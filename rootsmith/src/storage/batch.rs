@@ -16,8 +16,7 @@ use crate::types::Record;
 
 use super::RecordStorage;
 use super::StorageQueryFilter;
-
-const BATCH_PREFIX: u8 = 0x02;
+use super::BATCH_PREFIX;
 
 pub type BatchId = [u8; 16];
 pub type CommitmentId = [u8; 32];

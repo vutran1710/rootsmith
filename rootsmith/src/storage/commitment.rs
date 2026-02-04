@@ -12,10 +12,9 @@ use crate::types::Namespace;
 
 use super::batch::BatchId;
 use super::batch::CommitmentId;
-
-const COMMITMENT_PREFIX: u8 = 0x03;
-const COMMITMENT_NS_INDEX: u8 = 0x04;
-const COMMITMENT_TIME_INDEX: u8 = 0x05;
+use super::COMMITMENT_NS_INDEX;
+use super::COMMITMENT_PREFIX;
+use super::COMMITMENT_TIME_INDEX;
 
 mod key_layout {
     /// Key: prefix (1) + commitment_id (32) = 33 bytes

@@ -10,6 +10,7 @@ use crate::archiver::ArchiveVariant;
 use crate::config::Config;
 use crate::downstream::DownstreamVariant;
 use crate::server::{admin, Webserver};
+use crate::storage::Storable;
 use crate::storage::StorageManager;
 use crate::types::Namespace;
 use crate::types::UpstreamData;
@@ -129,7 +130,7 @@ impl RootSmith {
                     );
 
                     let storage = self.storage.lock().await;
-                    storage.records.put(&record)?;
+                    storage.put(Storable::Record(record))?;
                     tracing::info!("Stored in RocksDB");
                 }
                 Err(e) => tracing::error!("Plugin error: {}", e),
