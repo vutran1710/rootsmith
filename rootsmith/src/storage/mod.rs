@@ -43,8 +43,7 @@ pub use record::RecordStorage;
 pub use record::StorageQueryFilter;
 
 // Storage operation enums
-pub use enums::Deletable;
-pub use enums::Retrievable;
+pub use enums::Filter;
 pub use enums::Retrieved;
 pub use enums::Storable;
 pub use enums::Updatable;
@@ -92,10 +91,6 @@ impl StorageManager {
                 self.records.put(&record)?;
                 Ok(None)
             }
-            Storable::Records(records) => {
-                self.records.put_batch(&records)?;
-                Ok(None)
-            }
             Storable::Batch(batch) => {
                 self.batches.create(
                     batch.batch_id,
@@ -123,9 +118,9 @@ impl StorageManager {
     }
 
     /// Get an item from the appropriate storage using pattern matching.
-    pub fn get(&self, key: Retrievable) -> Result<Retrieved> {
-        match key {
-            Retrievable::Record {
+    pub fn get(&self, filter: Filter) -> Result<Retrieved> {
+        match filter {
+            Filter::Record {
                 namespace,
                 key,
                 timestamp,
@@ -133,66 +128,68 @@ impl StorageManager {
                 let record = self.records.get_version(&namespace, &key, timestamp)?;
                 Ok(Retrieved::Record(record))
             }
-            Retrievable::RecordLatest { namespace, key } => {
+            Filter::RecordLatest { namespace, key } => {
                 let record = self.records.get_latest(&namespace, &key)?;
                 Ok(Retrieved::Record(record))
             }
-            Retrievable::RecordAllVersions { namespace, key } => {
+            Filter::RecordAllVersions { namespace, key } => {
                 let records = self.records.get_all_versions(&namespace, &key)?;
                 Ok(Retrieved::Records(records))
             }
-            Retrievable::RecordsByNamespace(namespace) => {
+            Filter::RecordsByNamespace(namespace) => {
                 let records = self.records.query_namespace(&namespace)?;
                 Ok(Retrieved::Records(records))
             }
-            Retrievable::RecordsByFilter(filter) => {
+            Filter::RecordsByFilter(filter) => {
                 let records = self.records.query(&filter)?;
                 Ok(Retrieved::Records(records))
             }
-            Retrievable::Batch(batch_id) => {
+            Filter::Batch(batch_id) => {
                 let batch = self.batches.get(&batch_id)?;
                 Ok(Retrieved::Batch(batch))
             }
-            Retrievable::BatchAll => {
+            Filter::BatchAll => {
                 let batches = self.batches.list_all()?;
                 Ok(Retrieved::Batches(batches))
             }
-            Retrievable::BatchByStatus(status) => {
+            Filter::BatchByStatus(status) => {
                 let batches = self.batches.query_by_status(status)?;
                 Ok(Retrieved::Batches(batches))
             }
-            Retrievable::BatchRecords(batch_id) => {
+            Filter::BatchRecords(batch_id) => {
                 let records = self.batches.get_records(&batch_id, &self.records)?;
                 Ok(Retrieved::Records(records))
             }
-            Retrievable::Commitment(commitment_id) => {
+            Filter::Commitment(commitment_id) => {
                 let commitment = self.commitments.get(&commitment_id)?;
                 Ok(Retrieved::Commitment(commitment))
             }
-            Retrievable::CommitmentAll => {
+            Filter::CommitmentAll => {
                 let commitments = self.commitments.list_all()?;
                 Ok(Retrieved::Commitments(commitments))
             }
-            Retrievable::CommitmentByNamespace(namespace) => {
+            Filter::CommitmentByNamespace(namespace) => {
                 let commitments = self.commitments.get_by_namespace(&namespace)?;
                 Ok(Retrieved::Commitments(commitments))
             }
-            Retrievable::CommitmentByTimeRange { start, end } => {
+            Filter::CommitmentByTimeRange { start, end } => {
                 let commitments = self.commitments.query_by_time_range(start, end)?;
                 Ok(Retrieved::Commitments(commitments))
             }
         }
     }
 
-    /// Delete an item from the appropriate storage using pattern matching.
-    pub fn delete(&self, key: Deletable) -> Result<bool> {
-        match key {
-            Deletable::Records(filter) => {
+    /// Delete items matching the query.
+    /// Only supports: RecordsByFilter, Batch, Commitment.
+    pub fn delete(&self, filter: Filter) -> Result<bool> {
+        match filter {
+            Filter::RecordsByFilter(filter) => {
                 let count = self.records.delete(&filter)?;
                 Ok(count > 0)
             }
-            Deletable::Batch(batch_id) => self.batches.delete(&batch_id),
-            Deletable::Commitment(commitment_id) => self.commitments.delete(&commitment_id),
+            Filter::Batch(batch_id) => self.batches.delete(&batch_id),
+            Filter::Commitment(commitment_id) => self.commitments.delete(&commitment_id),
+            _ => Err(anyhow::anyhow!("Delete not supported for this query type")),
         }
     }
 

@@ -4,7 +4,7 @@ use anyhow::Result;
 use tempfile::TempDir;
 
 use rootsmith::storage::{
-    generate_batch_id, BatchMetadata, BatchStatus, Deletable, Retrievable, Retrieved, Storable,
+    generate_batch_id, BatchMetadata, BatchStatus,  Filter, Retrieved, Storable,
     StorageManager, StorageQueryFilter, StoredCommitment, Updatable,
 };
 use rootsmith::types::{Key16, Namespace, Record, UpstreamData};
@@ -89,7 +89,7 @@ fn test_record_put_and_get() -> Result<()> {
     let record = make_record(1, 1, "hello", 1000);
     storage.put(Storable::Record(record.clone()))?;
 
-    match storage.get(Retrievable::Record {
+    match storage.get(Filter::Record {
         namespace: record.namespace,
         key: record.key,
         timestamp: 1000,
@@ -113,7 +113,7 @@ fn test_record_get_latest() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 1, "v2", 2000)))?;
     storage.put(Storable::Record(make_record(1, 1, "v3", 1500)))?;
 
-    match storage.get(Retrievable::RecordLatest {
+    match storage.get(Filter::RecordLatest {
         namespace: make_namespace(1),
         key: make_key(1),
     })? {
@@ -134,7 +134,7 @@ fn test_record_get_all_versions() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 1, "v2", 2000)))?;
     storage.put(Storable::Record(make_record(1, 1, "v3", 3000)))?;
 
-    match storage.get(Retrievable::RecordAllVersions {
+    match storage.get(Filter::RecordAllVersions {
         namespace: make_namespace(1),
         key: make_key(1),
     })? {
@@ -151,7 +151,7 @@ fn test_record_get_all_versions() -> Result<()> {
 fn test_record_get_nonexistent() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
-    match storage.get(Retrievable::Record {
+    match storage.get(Filter::Record {
         namespace: make_namespace(99),
         key: make_key(99),
         timestamp: 1000,
@@ -164,18 +164,14 @@ fn test_record_get_nonexistent() -> Result<()> {
 }
 
 #[test]
-fn test_records_put_batch() -> Result<()> {
+fn test_records_put_multiple() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
-    let records = vec![
-        make_record(1, 1, "r1", 1000),
-        make_record(1, 2, "r2", 1000),
-        make_record(2, 1, "r3", 1000),
-    ];
+    storage.put(Storable::Record(make_record(1, 1, "r1", 1000)))?;
+    storage.put(Storable::Record(make_record(1, 2, "r2", 1000)))?;
+    storage.put(Storable::Record(make_record(2, 1, "r3", 1000)))?;
 
-    storage.put(Storable::Records(records))?;
-
-    match storage.get(Retrievable::RecordsByNamespace(make_namespace(1)))? {
+    match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
         Retrieved::Records(records) => assert_eq!(records.len(), 2),
         _ => panic!("Expected Records"),
     }
@@ -191,12 +187,12 @@ fn test_records_query_by_namespace() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 2, "ns1-k2", 1000)))?;
     storage.put(Storable::Record(make_record(2, 1, "ns2-k1", 1000)))?;
 
-    match storage.get(Retrievable::RecordsByNamespace(make_namespace(1)))? {
+    match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
         Retrieved::Records(records) => assert_eq!(records.len(), 2),
         _ => panic!("Expected Records"),
     }
 
-    match storage.get(Retrievable::RecordsByNamespace(make_namespace(2)))? {
+    match storage.get(Filter::RecordsByNamespace(make_namespace(2)))? {
         Retrieved::Records(records) => assert_eq!(records.len(), 1),
         _ => panic!("Expected Records"),
     }
@@ -218,7 +214,7 @@ fn test_records_query_by_filter() -> Result<()> {
         key: None,
     };
 
-    match storage.get(Retrievable::RecordsByFilter(filter))? {
+    match storage.get(Filter::RecordsByFilter(filter))? {
         Retrieved::Records(records) => {
             assert_eq!(records.len(), 1);
             assert_eq!(records[0].timestamp, 2000);
@@ -243,15 +239,15 @@ fn test_records_delete() -> Result<()> {
         key: None,
     };
 
-    let deleted = storage.delete(Deletable::Records(filter))?;
+    let deleted = storage.delete(Filter::RecordsByFilter(filter))?;
     assert!(deleted);
 
-    match storage.get(Retrievable::RecordsByNamespace(make_namespace(1)))? {
+    match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
         Retrieved::Records(records) => assert!(records.is_empty()),
         _ => panic!("Expected Records"),
     }
 
-    match storage.get(Retrievable::RecordsByNamespace(make_namespace(2)))? {
+    match storage.get(Filter::RecordsByNamespace(make_namespace(2)))? {
         Retrieved::Records(records) => assert_eq!(records.len(), 1),
         _ => panic!("Expected Records"),
     }
@@ -272,7 +268,7 @@ fn test_batch_put_and_get() -> Result<()> {
 
     storage.put(Storable::Batch(batch))?;
 
-    match storage.get(Retrievable::Batch(batch_id))? {
+    match storage.get(Filter::Batch(batch_id))? {
         Retrieved::Batch(Some(b)) => {
             assert_eq!(b.batch_id, batch_id);
             assert_eq!(b.time_start, 1000);
@@ -289,7 +285,7 @@ fn test_batch_put_and_get() -> Result<()> {
 fn test_batch_get_nonexistent() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
-    match storage.get(Retrievable::Batch([0xFFu8; 16]))? {
+    match storage.get(Filter::Batch([0xFFu8; 16]))? {
         Retrieved::Batch(None) => {}
         _ => panic!("Expected None"),
     }
@@ -312,7 +308,7 @@ fn test_batch_update_status() -> Result<()> {
         timestamp: 600,
     })?;
 
-    match storage.get(Retrievable::Batch(batch_id))? {
+    match storage.get(Filter::Batch(batch_id))? {
         Retrieved::Batch(Some(b)) => {
             assert_eq!(b.status, BatchStatus::Processing);
             assert_eq!(b.updated_at, 600);
@@ -338,7 +334,7 @@ fn test_batch_update_record_count() -> Result<()> {
         timestamp: 600,
     })?;
 
-    match storage.get(Retrievable::Batch(batch_id))? {
+    match storage.get(Filter::Batch(batch_id))? {
         Retrieved::Batch(Some(b)) => {
             assert_eq!(b.record_count, 42);
         }
@@ -364,7 +360,7 @@ fn test_batch_mark_committed() -> Result<()> {
         timestamp: 600,
     })?;
 
-    match storage.get(Retrievable::Batch(batch_id))? {
+    match storage.get(Filter::Batch(batch_id))? {
         Retrieved::Batch(Some(b)) => {
             assert_eq!(b.status, BatchStatus::Committed);
             assert_eq!(b.commitment_id, Some(commitment_id));
@@ -393,7 +389,7 @@ fn test_batch_query_by_status() -> Result<()> {
         timestamp: 600,
     })?;
 
-    match storage.get(Retrievable::BatchByStatus(BatchStatus::Pending))? {
+    match storage.get(Filter::BatchByStatus(BatchStatus::Pending))? {
         Retrieved::Batches(batches) => {
             assert_eq!(batches.len(), 1);
             assert_eq!(batches[0].batch_id, batch1_id);
@@ -401,7 +397,7 @@ fn test_batch_query_by_status() -> Result<()> {
         _ => panic!("Expected Batches"),
     }
 
-    match storage.get(Retrievable::BatchByStatus(BatchStatus::Processing))? {
+    match storage.get(Filter::BatchByStatus(BatchStatus::Processing))? {
         Retrieved::Batches(batches) => {
             assert_eq!(batches.len(), 1);
             assert_eq!(batches[0].batch_id, batch2_id);
@@ -420,7 +416,7 @@ fn test_batch_list_all() -> Result<()> {
     storage.put(Storable::Batch(make_batch(2, 2000, 3000, 500)))?;
     storage.put(Storable::Batch(make_batch(3, 3000, 4000, 500)))?;
 
-    match storage.get(Retrievable::BatchAll)? {
+    match storage.get(Filter::BatchAll)? {
         Retrieved::Batches(batches) => assert_eq!(batches.len(), 3),
         _ => panic!("Expected Batches"),
     }
@@ -442,7 +438,7 @@ fn test_batch_get_records() -> Result<()> {
     let batch_id = batch.batch_id;
     storage.put(Storable::Batch(batch))?;
 
-    match storage.get(Retrievable::BatchRecords(batch_id))? {
+    match storage.get(Filter::BatchRecords(batch_id))? {
         Retrieved::Records(records) => assert_eq!(records.len(), 2),
         _ => panic!("Expected Records"),
     }
@@ -459,10 +455,10 @@ fn test_batch_delete() -> Result<()> {
 
     storage.put(Storable::Batch(batch))?;
 
-    let deleted = storage.delete(Deletable::Batch(batch_id))?;
+    let deleted = storage.delete(Filter::Batch(batch_id))?;
     assert!(deleted);
 
-    match storage.get(Retrievable::Batch(batch_id))? {
+    match storage.get(Filter::Batch(batch_id))? {
         Retrieved::Batch(None) => {}
         _ => panic!("Expected None"),
     }
@@ -484,7 +480,7 @@ fn test_commitment_put_and_get() -> Result<()> {
     assert!(result.is_some());
     let commitment_id = result.unwrap();
 
-    match storage.get(Retrievable::Commitment(commitment_id))? {
+    match storage.get(Filter::Commitment(commitment_id))? {
         Retrieved::Commitment(Some(c)) => {
             assert_eq!(c.record_count, 100);
             assert_eq!(c.committed_at, 3000);
@@ -499,7 +495,7 @@ fn test_commitment_put_and_get() -> Result<()> {
 fn test_commitment_get_nonexistent() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
-    match storage.get(Retrievable::Commitment([0xFFu8; 32]))? {
+    match storage.get(Filter::Commitment([0xFFu8; 32]))? {
         Retrieved::Commitment(None) => {}
         _ => panic!("Expected None"),
     }
@@ -514,7 +510,7 @@ fn test_commitment_list_all() -> Result<()> {
     storage.put(Storable::Commitment(make_commitment(1, 1, [0x01u8; 16], 10, 1000)))?;
     storage.put(Storable::Commitment(make_commitment(2, 2, [0x02u8; 16], 20, 2000)))?;
 
-    match storage.get(Retrievable::CommitmentAll)? {
+    match storage.get(Filter::CommitmentAll)? {
         Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 2),
         _ => panic!("Expected Commitments"),
     }
@@ -529,7 +525,7 @@ fn test_commitment_by_namespace() -> Result<()> {
     storage.put(Storable::Commitment(make_commitment(1, 1, [0x01u8; 16], 10, 1000)))?;
     storage.put(Storable::Commitment(make_commitment(2, 2, [0x02u8; 16], 20, 2000)))?;
 
-    match storage.get(Retrievable::CommitmentByNamespace(make_namespace(1)))? {
+    match storage.get(Filter::CommitmentByNamespace(make_namespace(1)))? {
         Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 1),
         _ => panic!("Expected Commitments"),
     }
@@ -545,7 +541,7 @@ fn test_commitment_by_time_range() -> Result<()> {
     storage.put(Storable::Commitment(make_commitment(2, 1, [0x02u8; 16], 20, 2000)))?;
     storage.put(Storable::Commitment(make_commitment(3, 1, [0x03u8; 16], 30, 3000)))?;
 
-    match storage.get(Retrievable::CommitmentByTimeRange {
+    match storage.get(Filter::CommitmentByTimeRange {
         start: 1500,
         end: 2500,
     })? {
@@ -566,10 +562,10 @@ fn test_commitment_delete() -> Result<()> {
     let commitment = make_commitment(1, 1, [0x01u8; 16], 100, 3000);
     let commitment_id = storage.put(Storable::Commitment(commitment))?.unwrap();
 
-    let deleted = storage.delete(Deletable::Commitment(commitment_id))?;
+    let deleted = storage.delete(Filter::Commitment(commitment_id))?;
     assert!(deleted);
 
-    match storage.get(Retrievable::Commitment(commitment_id))? {
+    match storage.get(Filter::Commitment(commitment_id))? {
         Retrieved::Commitment(None) => {}
         _ => panic!("Expected None"),
     }
@@ -591,34 +587,34 @@ fn test_storage_isolation() -> Result<()> {
     storage.put(Storable::Commitment(make_commitment(1, 1, [0x01u8; 16], 10, 3000)))?;
 
     // Verify each storage has its own data
-    match storage.get(Retrievable::RecordsByNamespace(make_namespace(1)))? {
+    match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
         Retrieved::Records(records) => assert_eq!(records.len(), 1),
         _ => panic!("Expected Records"),
     }
 
-    match storage.get(Retrievable::BatchAll)? {
+    match storage.get(Filter::BatchAll)? {
         Retrieved::Batches(batches) => assert_eq!(batches.len(), 1),
         _ => panic!("Expected Batches"),
     }
 
-    match storage.get(Retrievable::CommitmentAll)? {
+    match storage.get(Filter::CommitmentAll)? {
         Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 1),
         _ => panic!("Expected Commitments"),
     }
 
     // Delete records, others should remain
-    storage.delete(Deletable::Records(StorageQueryFilter {
+    storage.delete(Filter::RecordsByFilter(StorageQueryFilter {
         namespace: make_namespace(1),
         time_range: None,
         key: None,
     }))?;
 
-    match storage.get(Retrievable::BatchAll)? {
+    match storage.get(Filter::BatchAll)? {
         Retrieved::Batches(batches) => assert_eq!(batches.len(), 1),
         _ => panic!("Expected Batches"),
     }
 
-    match storage.get(Retrievable::CommitmentAll)? {
+    match storage.get(Filter::CommitmentAll)? {
         Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 1),
         _ => panic!("Expected Commitments"),
     }
@@ -643,17 +639,17 @@ fn test_storage_persistence() -> Result<()> {
     {
         let storage = StorageManager::open(path)?;
 
-        match storage.get(Retrievable::RecordsByNamespace(make_namespace(1)))? {
+        match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
             Retrieved::Records(records) => assert_eq!(records.len(), 1),
             _ => panic!("Expected Records"),
         }
 
-        match storage.get(Retrievable::BatchAll)? {
+        match storage.get(Filter::BatchAll)? {
             Retrieved::Batches(batches) => assert_eq!(batches.len(), 1),
             _ => panic!("Expected Batches"),
         }
 
-        match storage.get(Retrievable::CommitmentAll)? {
+        match storage.get(Filter::CommitmentAll)? {
             Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 1),
             _ => panic!("Expected Commitments"),
         }
@@ -667,11 +663,9 @@ fn test_full_workflow() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
     // 1. Store records
-    storage.put(Storable::Records(vec![
-        make_record(1, 1, "data1", 1500),
-        make_record(1, 2, "data2", 1600),
-        make_record(1, 3, "data3", 1700),
-    ]))?;
+    storage.put(Storable::Record(make_record(1, 1, "data1", 1500)))?;
+    storage.put(Storable::Record(make_record(1, 2, "data2", 1600)))?;
+    storage.put(Storable::Record(make_record(1, 3, "data3", 1700)))?;
 
     // 2. Create batch
     let batch = make_batch(1, 1000, 2000, 500);
@@ -679,7 +673,7 @@ fn test_full_workflow() -> Result<()> {
     storage.put(Storable::Batch(batch))?;
 
     // 3. Get batch records
-    let record_count = match storage.get(Retrievable::BatchRecords(batch_id))? {
+    let record_count = match storage.get(Filter::BatchRecords(batch_id))? {
         Retrieved::Records(records) => records.len() as u64,
         _ => 0,
     };
@@ -720,7 +714,7 @@ fn test_full_workflow() -> Result<()> {
     })?;
 
     // 8. Verify final state
-    match storage.get(Retrievable::Batch(batch_id))? {
+    match storage.get(Filter::Batch(batch_id))? {
         Retrieved::Batch(Some(b)) => {
             assert_eq!(b.status, BatchStatus::Committed);
             assert_eq!(b.record_count, 3);
@@ -729,7 +723,7 @@ fn test_full_workflow() -> Result<()> {
         _ => panic!("Expected Batch"),
     }
 
-    match storage.get(Retrievable::Commitment(commitment_id))? {
+    match storage.get(Filter::Commitment(commitment_id))? {
         Retrieved::Commitment(Some(c)) => {
             assert_eq!(c.record_count, 3);
             assert_eq!(c.batch_id, batch_id);

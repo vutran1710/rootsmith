@@ -15,49 +15,49 @@ use super::StoredCommitment;
 #[derive(Debug, Clone)]
 pub enum Storable {
     Record(Record),
-    Records(Vec<Record>),
     Batch(BatchMetadata),
     Commitment(StoredCommitment),
 }
 
-/// Keys for retrieving items from the database.
+/// Query for finding items in the database.
+/// Used by both `get` and `delete` operations.
 #[derive(Debug, Clone)]
-pub enum Retrievable {
-    /// Get record by namespace, key, and timestamp
+pub enum Filter {
+    /// Find record by namespace, key, and timestamp
     Record {
         namespace: Namespace,
         key: Key16,
         timestamp: u64,
     },
-    /// Get latest record by namespace and key
+    /// Find latest record by namespace and key
     RecordLatest {
         namespace: Namespace,
         key: Key16,
     },
-    /// Get all versions of a record
+    /// Find all versions of a record
     RecordAllVersions {
         namespace: Namespace,
         key: Key16,
     },
-    /// Get all records in a namespace
+    /// Find all records in a namespace
     RecordsByNamespace(Namespace),
-    /// Get records matching a filter
+    /// Find records matching a filter
     RecordsByFilter(StorageQueryFilter),
-    /// Get batch by ID
+    /// Find batch by ID
     Batch(BatchId),
-    /// Get all batches
+    /// Find all batches
     BatchAll,
-    /// Get batches by status
+    /// Find batches by status
     BatchByStatus(BatchStatus),
-    /// Get records for a batch
+    /// Find records for a batch
     BatchRecords(BatchId),
-    /// Get commitment by ID
+    /// Find commitment by ID
     Commitment(CommitmentId),
-    /// Get all commitments
+    /// Find all commitments
     CommitmentAll,
-    /// Get commitments by namespace
+    /// Find commitments by namespace
     CommitmentByNamespace(Namespace),
-    /// Get commitments by time range
+    /// Find commitments by time range
     CommitmentByTimeRange { start: u64, end: u64 },
 }
 
@@ -70,17 +70,6 @@ pub enum Retrieved {
     Batches(Vec<BatchMetadata>),
     Commitment(Option<StoredCommitment>),
     Commitments(Vec<(CommitmentId, StoredCommitment)>),
-}
-
-/// Keys for deleting items from the database.
-#[derive(Debug, Clone)]
-pub enum Deletable {
-    /// Delete records matching filter
-    Records(StorageQueryFilter),
-    /// Delete batch by ID
-    Batch(BatchId),
-    /// Delete commitment by ID
-    Commitment(CommitmentId),
 }
 
 /// Update operations for batches.
