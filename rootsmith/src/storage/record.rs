@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use anyhow::Result;
-use rocksdb::Options;
 use rocksdb::WriteBatch;
 use rocksdb::DB;
 use serde::Deserialize;
@@ -14,15 +13,21 @@ use crate::types::Namespace;
 use crate::types::Record;
 use crate::types::UpstreamData;
 
+const RECORD_PREFIX: u8 = 0x01;
+
 mod key_layout {
-    pub const NAMESPACE_OFFSET: usize = 0;
+    pub const PREFIX_SIZE: usize = 1;
+    pub const NAMESPACE_OFFSET: usize = PREFIX_SIZE;
     pub const NAMESPACE_SIZE: usize = 16;
     pub const KEY_OFFSET: usize = NAMESPACE_OFFSET + NAMESPACE_SIZE;
     pub const KEY_SIZE: usize = 16;
     pub const TIMESTAMP_OFFSET: usize = KEY_OFFSET + KEY_SIZE;
     pub const TIMESTAMP_SIZE: usize = 8;
     pub const TOTAL_SIZE: usize = TIMESTAMP_OFFSET + TIMESTAMP_SIZE;
-    pub const NAMESPACE_KEY_PREFIX_SIZE: usize = NAMESPACE_SIZE + KEY_SIZE;
+    /// Prefix + namespace size for namespace-only queries
+    pub const NAMESPACE_PREFIX_SIZE: usize = PREFIX_SIZE + NAMESPACE_SIZE;
+    /// Prefix + namespace + key size for key-specific queries
+    pub const NAMESPACE_KEY_PREFIX_SIZE: usize = PREFIX_SIZE + NAMESPACE_SIZE + KEY_SIZE;
 }
 
 use key_layout::*;
@@ -52,6 +57,7 @@ impl From<&Record> for StoredRecord {
     fn from(record: &Record) -> Self {
         let key: StorageKey = {
             let mut storage_key = [0u8; TOTAL_SIZE];
+            storage_key[0] = RECORD_PREFIX;
             storage_key[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(&record.namespace);
             storage_key[KEY_OFFSET..TIMESTAMP_OFFSET].copy_from_slice(&record.key);
             storage_key[TIMESTAMP_OFFSET..TOTAL_SIZE]
@@ -95,6 +101,9 @@ impl From<StoredRecord> for Record {
             (namespace_bytes, key_bytes, timestamp)
         };
 
+        // Verify prefix (debug assertion)
+        debug_assert_eq!(stored.key[0], RECORD_PREFIX);
+
         let (value, metadata) = {
             let PackedValue {
                 data: raw_data,
@@ -137,12 +146,8 @@ pub struct RecordStorage {
 }
 
 impl RecordStorage {
-    pub fn open(path: &str) -> Result<Self> {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.set_max_open_files(-1);
-        let db = DB::open(&opts, path)?;
-        Ok(Self { db: Arc::new(db) })
+    pub fn new(db: Arc<DB>) -> Self {
+        Self { db }
     }
 
     pub fn put(&self, record: &Record) -> Result<()> {
@@ -168,6 +173,7 @@ impl RecordStorage {
         timestamp: u64,
     ) -> Result<Option<Record>> {
         let mut storage_key = [0u8; TOTAL_SIZE];
+        storage_key[0] = RECORD_PREFIX;
         storage_key[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(namespace);
         storage_key[KEY_OFFSET..TIMESTAMP_OFFSET].copy_from_slice(key);
         storage_key[TIMESTAMP_OFFSET..TOTAL_SIZE].copy_from_slice(&timestamp.to_be_bytes());
@@ -190,6 +196,7 @@ impl RecordStorage {
 
     pub fn get_all_versions(&self, namespace: &Namespace, key: &Key16) -> Result<Vec<Record>> {
         let mut prefix = [0u8; NAMESPACE_KEY_PREFIX_SIZE];
+        prefix[0] = RECORD_PREFIX;
         prefix[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(namespace);
         prefix[KEY_OFFSET..NAMESPACE_KEY_PREFIX_SIZE].copy_from_slice(key);
 
@@ -215,8 +222,9 @@ impl RecordStorage {
     }
 
     pub fn query_namespace(&self, namespace: &Namespace) -> Result<Vec<Record>> {
-        let mut prefix = [0u8; NAMESPACE_SIZE];
-        prefix.copy_from_slice(namespace);
+        let mut prefix = [0u8; NAMESPACE_PREFIX_SIZE];
+        prefix[0] = RECORD_PREFIX;
+        prefix[1..NAMESPACE_PREFIX_SIZE].copy_from_slice(namespace);
 
         let mut results = Vec::new();
         let iter = self.db.prefix_iterator(&prefix);
@@ -302,12 +310,14 @@ impl RecordStorage {
     fn build_prefix(&self, filter: &StorageQueryFilter) -> Result<Vec<u8>> {
         if let Some(key) = &filter.key {
             let mut prefix = [0u8; NAMESPACE_KEY_PREFIX_SIZE];
+            prefix[0] = RECORD_PREFIX;
             prefix[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(&filter.namespace);
             prefix[KEY_OFFSET..NAMESPACE_KEY_PREFIX_SIZE].copy_from_slice(key);
             Ok(prefix.to_vec())
         } else {
-            let mut prefix = [0u8; NAMESPACE_SIZE];
-            prefix.copy_from_slice(&filter.namespace);
+            let mut prefix = [0u8; NAMESPACE_PREFIX_SIZE];
+            prefix[0] = RECORD_PREFIX;
+            prefix[1..NAMESPACE_PREFIX_SIZE].copy_from_slice(&filter.namespace);
             Ok(prefix.to_vec())
         }
     }
