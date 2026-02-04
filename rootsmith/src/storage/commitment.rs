@@ -1,9 +1,3 @@
-//! Commitment storage for finalized Merkle roots.
-//!
-//! Commitments represent the finalized state of a batch of records.
-//! Each commitment contains the Merkle root and metadata about the
-//! time range and namespaces it covers.
-
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -41,7 +35,7 @@ type TimeIndexKey = [u8; TIME_INDEX_KEY_SIZE];
 /// Stored commitment data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredCommitment {
-    /// Merkle root (typically 32 bytes)
+    /// Commitment root/digest (Merkle root, ZK commitment, etc.)
     pub root: Vec<u8>,
     /// Namespaces included in this commitment
     pub namespaces: Vec<Namespace>,
@@ -55,7 +49,7 @@ pub struct StoredCommitment {
     pub record_count: u64,
     /// When commitment was created
     pub committed_at: u64,
-    /// Inclusion proofs for specific keys (optional)
+    /// Proofs for specific keys (Merkle inclusion proofs, ZK proofs, etc.)
     pub proofs: HashMap<Key16, Vec<u8>>,
 }
 
@@ -93,7 +87,7 @@ fn make_time_index_prefix() -> [u8; 1] {
     [COMMITMENT_TIME_INDEX]
 }
 
-/// Generate commitment ID from Merkle root.
+/// Generate commitment ID from root/digest bytes.
 pub fn commitment_id_from_root(root: &[u8]) -> CommitmentId {
     let mut id = [0u8; 32];
     let len = root.len().min(32);
