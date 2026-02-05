@@ -10,7 +10,8 @@ use crate::archiver::ArchiveVariant;
 use crate::config::Config;
 use crate::downstream::DownstreamVariant;
 use crate::server::{admin, Webserver};
-use crate::storage::Storage;
+use crate::storage::Storable;
+use crate::storage::StorageManager;
 use crate::types::Namespace;
 use crate::types::UpstreamData;
 use crate::upstream::UpstreamConnector;
@@ -53,7 +54,7 @@ pub struct RootSmith {
     pub config: Config,
 
     /// Persistent storage (RocksDB).
-    pub storage: Arc<tokio::sync::Mutex<Storage>>,
+    pub storage: Arc<tokio::sync::Mutex<StorageManager>>,
 
     /// Start time of the current epoch (unix seconds).
     pub epoch_start_ts: Arc<tokio::sync::Mutex<u64>>,
@@ -74,7 +75,7 @@ pub struct RootSmith {
 impl RootSmith {
     /// Initialize RootSmith with default Noop implementations.
     pub async fn initialize(config: Config, wasm_path: std::path::PathBuf) -> Self {
-        let storage = Storage::open(&config.storage_path).expect("Failed to open storage");
+        let storage = StorageManager::open(&config.storage_path).expect("Failed to open storage");
         tracing::info!("Storage opened at: {}", config.storage_path);
 
         let webserver = Webserver::new(config.http_port).register(admin::routes());
@@ -129,7 +130,7 @@ impl RootSmith {
                     );
 
                     let storage = self.storage.lock().await;
-                    storage.put(&record)?;
+                    storage.put(Storable::Record(record))?;
                     tracing::info!("Stored in RocksDB");
                 }
                 Err(e) => tracing::error!("Plugin error: {}", e),

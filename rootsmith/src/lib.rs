@@ -23,7 +23,7 @@ pub use downstream::DownstreamVariant;
 pub use rootsmith::CommittedRecord;
 pub use rootsmith::EpochPhase;
 pub use rootsmith::RootSmith;
-pub use storage::Storage;
+pub use storage::StorageManager;
 pub use types::Commitment;
 pub use utils::HttpClient;
 pub use utils::HttpClientError;
