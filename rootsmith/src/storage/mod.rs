@@ -22,7 +22,7 @@ pub(crate) const COMMITMENT_TIME_INDEX: u8 = 0x05;
 
 mod batch;
 mod commitment;
-mod enums;
+mod types;
 mod record;
 
 // Batch types and storage
@@ -42,11 +42,10 @@ pub use commitment::StoredCommitment;
 pub use record::RecordStorage;
 pub use record::StorageQueryFilter;
 
-// Storage operation enums
-pub use enums::Filter;
-pub use enums::Retrieved;
-pub use enums::Storable;
-pub use enums::Updatable;
+// Storage operation types
+pub use types::Entity;
+pub use types::Filter;
+pub use types::Storable;
 
 /// Open a shared RocksDB instance for all storages.
 pub fn open_db(path: &str) -> Result<Arc<DB>> {
@@ -85,11 +84,11 @@ impl StorageManager {
     }
 
     /// Put an item into the appropriate storage using pattern matching.
-    pub fn put(&self, item: Storable) -> Result<Option<CommitmentId>> {
+    pub fn put(&self, item: Storable) -> Result<()> {
         match item {
             Storable::Record(record) => {
                 self.records.put(&record)?;
-                Ok(None)
+                Ok(())
             }
             Storable::Batch(batch) => {
                 self.batches.create(
@@ -99,10 +98,10 @@ impl StorageManager {
                     batch.time_end,
                     batch.created_at,
                 )?;
-                Ok(None)
+                Ok(())
             }
             Storable::Commitment(commitment) => {
-                let id = self.commitments.store(
+                self.commitments.store(
                     commitment.root,
                     commitment.namespaces,
                     commitment.batch_id,
@@ -112,107 +111,95 @@ impl StorageManager {
                     commitment.committed_at,
                     commitment.proofs,
                 )?;
-                Ok(Some(id))
+                Ok(())
             }
         }
     }
 
-    /// Get an item from the appropriate storage using pattern matching.
-    pub fn get(&self, filter: Filter) -> Result<Retrieved> {
-        match filter {
-            Filter::Record {
-                namespace,
-                key,
-                timestamp,
-            } => {
-                let record = self.records.get_version(&namespace, &key, timestamp)?;
-                Ok(Retrieved::Record(record))
+    /// Get items from the appropriate storage.
+    pub fn get(&self, filter: Filter) -> Result<Vec<Storable>> {
+        match filter.entity {
+            Entity::Record => {
+                if let Some(batch_id) = filter.batch_id {
+                    let records = self.batches.get_records(&batch_id, &self.records)?;
+                    Ok(records.into_iter().map(Storable::Record).collect())
+                } else if let Some(query) = filter.query {
+                    let records = self.records.query(&query)?;
+                    Ok(records.into_iter().map(Storable::Record).collect())
+                } else if let (Some(namespace), Some(key)) = (&filter.namespace, &filter.key) {
+                    if let Some(timestamp) = filter.timestamp {
+                        let record = self.records.get_version(namespace, key, timestamp)?;
+                        Ok(record.into_iter().map(Storable::Record).collect())
+                    } else if filter.all_versions {
+                        let records = self.records.get_all_versions(namespace, key)?;
+                        Ok(records.into_iter().map(Storable::Record).collect())
+                    } else {
+                        let record = self.records.get_latest(namespace, key)?;
+                        Ok(record.into_iter().map(Storable::Record).collect())
+                    }
+                } else if let Some(namespace) = &filter.namespace {
+                    let records = self.records.query_namespace(namespace)?;
+                    Ok(records.into_iter().map(Storable::Record).collect())
+                } else {
+                    Err(anyhow::anyhow!("Invalid record filter"))
+                }
             }
-            Filter::RecordLatest { namespace, key } => {
-                let record = self.records.get_latest(&namespace, &key)?;
-                Ok(Retrieved::Record(record))
+            Entity::Batch => {
+                if let Some(batch_id) = filter.batch_id {
+                    let batch = self.batches.get(&batch_id)?;
+                    Ok(batch.into_iter().map(Storable::Batch).collect())
+                } else if let Some(status) = filter.status {
+                    let batches = self.batches.query_by_status(status)?;
+                    Ok(batches.into_iter().map(Storable::Batch).collect())
+                } else {
+                    let batches = self.batches.list_all()?;
+                    Ok(batches.into_iter().map(Storable::Batch).collect())
+                }
             }
-            Filter::RecordAllVersions { namespace, key } => {
-                let records = self.records.get_all_versions(&namespace, &key)?;
-                Ok(Retrieved::Records(records))
-            }
-            Filter::RecordsByNamespace(namespace) => {
-                let records = self.records.query_namespace(&namespace)?;
-                Ok(Retrieved::Records(records))
-            }
-            Filter::RecordsByFilter(filter) => {
-                let records = self.records.query(&filter)?;
-                Ok(Retrieved::Records(records))
-            }
-            Filter::Batch(batch_id) => {
-                let batch = self.batches.get(&batch_id)?;
-                Ok(Retrieved::Batch(batch))
-            }
-            Filter::BatchAll => {
-                let batches = self.batches.list_all()?;
-                Ok(Retrieved::Batches(batches))
-            }
-            Filter::BatchByStatus(status) => {
-                let batches = self.batches.query_by_status(status)?;
-                Ok(Retrieved::Batches(batches))
-            }
-            Filter::BatchRecords(batch_id) => {
-                let records = self.batches.get_records(&batch_id, &self.records)?;
-                Ok(Retrieved::Records(records))
-            }
-            Filter::Commitment(commitment_id) => {
-                let commitment = self.commitments.get(&commitment_id)?;
-                Ok(Retrieved::Commitment(commitment))
-            }
-            Filter::CommitmentAll => {
-                let commitments = self.commitments.list_all()?;
-                Ok(Retrieved::Commitments(commitments))
-            }
-            Filter::CommitmentByNamespace(namespace) => {
-                let commitments = self.commitments.get_by_namespace(&namespace)?;
-                Ok(Retrieved::Commitments(commitments))
-            }
-            Filter::CommitmentByTimeRange { start, end } => {
-                let commitments = self.commitments.query_by_time_range(start, end)?;
-                Ok(Retrieved::Commitments(commitments))
+            Entity::Commitment => {
+                if let Some(commitment_id) = filter.commitment_id {
+                    let commitment = self.commitments.get(&commitment_id)?;
+                    Ok(commitment.into_iter().map(Storable::Commitment).collect())
+                } else if let Some(namespace) = &filter.namespace {
+                    let commitments = self.commitments.get_by_namespace(namespace)?;
+                    Ok(commitments.into_iter().map(|(_, c)| Storable::Commitment(c)).collect())
+                } else if let (Some(start), Some(end)) = (filter.time_start, filter.time_end) {
+                    let commitments = self.commitments.query_by_time_range(start, end)?;
+                    Ok(commitments.into_iter().map(|(_, c)| Storable::Commitment(c)).collect())
+                } else {
+                    let commitments = self.commitments.list_all()?;
+                    Ok(commitments.into_iter().map(|(_, c)| Storable::Commitment(c)).collect())
+                }
             }
         }
     }
 
-    /// Delete items matching the query.
-    /// Only supports: RecordsByFilter, Batch, Commitment.
+    /// Delete items matching the filter.
+    /// Records require a query filter, batches require a batch_id, commitments require a commitment_id.
     pub fn delete(&self, filter: Filter) -> Result<bool> {
-        match filter {
-            Filter::RecordsByFilter(filter) => {
-                let count = self.records.delete(&filter)?;
-                Ok(count > 0)
+        match filter.entity {
+            Entity::Record => {
+                if let Some(query) = filter.query {
+                    let count = self.records.delete(&query)?;
+                    Ok(count > 0)
+                } else {
+                    Err(anyhow::anyhow!("Record delete requires a query filter"))
+                }
             }
-            Filter::Batch(batch_id) => self.batches.delete(&batch_id),
-            Filter::Commitment(commitment_id) => self.commitments.delete(&commitment_id),
-            _ => Err(anyhow::anyhow!("Delete not supported for this query type")),
-        }
-    }
-
-    /// Update an item using pattern matching.
-    pub fn update(&self, op: Updatable) -> Result<bool> {
-        match op {
-            Updatable::BatchStatus {
-                batch_id,
-                status,
-                timestamp,
-            } => self.batches.update_status(&batch_id, status, timestamp),
-            Updatable::BatchRecordCount {
-                batch_id,
-                count,
-                timestamp,
-            } => self.batches.update_record_count(&batch_id, count, timestamp),
-            Updatable::BatchCommitted {
-                batch_id,
-                commitment_id,
-                timestamp,
-            } => self
-                .batches
-                .mark_committed(&batch_id, &commitment_id, timestamp),
+            Entity::Batch => {
+                if let Some(batch_id) = filter.batch_id {
+                    self.batches.delete(&batch_id)
+                } else {
+                    Err(anyhow::anyhow!("Batch delete requires a batch_id"))
+                }
+            }
+            Entity::Commitment => {
+                if let Some(commitment_id) = filter.commitment_id {
+                    self.commitments.delete(&commitment_id)
+                } else {
+                    Err(anyhow::anyhow!("Commitment delete requires a commitment_id"))
+                }
+            }
         }
     }
 }

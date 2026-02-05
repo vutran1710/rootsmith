@@ -4,8 +4,8 @@ use anyhow::Result;
 use tempfile::TempDir;
 
 use rootsmith::storage::{
-    generate_batch_id, BatchMetadata, BatchStatus,  Filter, Retrieved, Storable,
-    StorageManager, StorageQueryFilter, StoredCommitment, Updatable,
+    commitment_id_from_root, generate_batch_id, BatchMetadata, BatchStatus, Filter, Storable,
+    StorageManager, StorageQueryFilter, StoredCommitment,
 };
 use rootsmith::types::{Key16, Namespace, Record, UpstreamData};
 
@@ -89,12 +89,10 @@ fn test_record_put_and_get() -> Result<()> {
     let record = make_record(1, 1, "hello", 1000);
     storage.put(Storable::Record(record.clone()))?;
 
-    match storage.get(Filter::Record {
-        namespace: record.namespace,
-        key: record.key,
-        timestamp: 1000,
-    })? {
-        Retrieved::Record(Some(r)) => {
+    let results = storage.get(Filter::record(record.namespace, record.key, 1000))?;
+    assert_eq!(results.len(), 1);
+    match &results[0] {
+        Storable::Record(r) => {
             assert_eq!(r.namespace, record.namespace);
             assert_eq!(r.key, record.key);
             assert_eq!(r.timestamp, 1000);
@@ -113,11 +111,10 @@ fn test_record_get_latest() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 1, "v2", 2000)))?;
     storage.put(Storable::Record(make_record(1, 1, "v3", 1500)))?;
 
-    match storage.get(Filter::RecordLatest {
-        namespace: make_namespace(1),
-        key: make_key(1),
-    })? {
-        Retrieved::Record(Some(r)) => {
+    let results = storage.get(Filter::record_latest(make_namespace(1), make_key(1)))?;
+    assert_eq!(results.len(), 1);
+    match &results[0] {
+        Storable::Record(r) => {
             assert_eq!(r.timestamp, 2000);
         }
         _ => panic!("Expected Record"),
@@ -134,15 +131,8 @@ fn test_record_get_all_versions() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 1, "v2", 2000)))?;
     storage.put(Storable::Record(make_record(1, 1, "v3", 3000)))?;
 
-    match storage.get(Filter::RecordAllVersions {
-        namespace: make_namespace(1),
-        key: make_key(1),
-    })? {
-        Retrieved::Records(records) => {
-            assert_eq!(records.len(), 3);
-        }
-        _ => panic!("Expected Records"),
-    }
+    let results = storage.get(Filter::record_all_versions(make_namespace(1), make_key(1)))?;
+    assert_eq!(results.len(), 3);
 
     Ok(())
 }
@@ -151,14 +141,8 @@ fn test_record_get_all_versions() -> Result<()> {
 fn test_record_get_nonexistent() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
-    match storage.get(Filter::Record {
-        namespace: make_namespace(99),
-        key: make_key(99),
-        timestamp: 1000,
-    })? {
-        Retrieved::Record(None) => {}
-        _ => panic!("Expected None"),
-    }
+    let results = storage.get(Filter::record(make_namespace(99), make_key(99), 1000))?;
+    assert!(results.is_empty());
 
     Ok(())
 }
@@ -171,10 +155,8 @@ fn test_records_put_multiple() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 2, "r2", 1000)))?;
     storage.put(Storable::Record(make_record(2, 1, "r3", 1000)))?;
 
-    match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
-        Retrieved::Records(records) => assert_eq!(records.len(), 2),
-        _ => panic!("Expected Records"),
-    }
+    let results = storage.get(Filter::records_by_namespace(make_namespace(1)))?;
+    assert_eq!(results.len(), 2);
 
     Ok(())
 }
@@ -187,15 +169,11 @@ fn test_records_query_by_namespace() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 2, "ns1-k2", 1000)))?;
     storage.put(Storable::Record(make_record(2, 1, "ns2-k1", 1000)))?;
 
-    match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
-        Retrieved::Records(records) => assert_eq!(records.len(), 2),
-        _ => panic!("Expected Records"),
-    }
+    let results = storage.get(Filter::records_by_namespace(make_namespace(1)))?;
+    assert_eq!(results.len(), 2);
 
-    match storage.get(Filter::RecordsByNamespace(make_namespace(2)))? {
-        Retrieved::Records(records) => assert_eq!(records.len(), 1),
-        _ => panic!("Expected Records"),
-    }
+    let results = storage.get(Filter::records_by_namespace(make_namespace(2)))?;
+    assert_eq!(results.len(), 1);
 
     Ok(())
 }
@@ -214,12 +192,13 @@ fn test_records_query_by_filter() -> Result<()> {
         key: None,
     };
 
-    match storage.get(Filter::RecordsByFilter(filter))? {
-        Retrieved::Records(records) => {
-            assert_eq!(records.len(), 1);
-            assert_eq!(records[0].timestamp, 2000);
+    let results = storage.get(Filter::records_by_query(filter))?;
+    assert_eq!(results.len(), 1);
+    match &results[0] {
+        Storable::Record(r) => {
+            assert_eq!(r.timestamp, 2000);
         }
-        _ => panic!("Expected Records"),
+        _ => panic!("Expected Record"),
     }
 
     Ok(())
@@ -239,18 +218,14 @@ fn test_records_delete() -> Result<()> {
         key: None,
     };
 
-    let deleted = storage.delete(Filter::RecordsByFilter(filter))?;
+    let deleted = storage.delete(Filter::records_by_query(filter))?;
     assert!(deleted);
 
-    match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
-        Retrieved::Records(records) => assert!(records.is_empty()),
-        _ => panic!("Expected Records"),
-    }
+    let results = storage.get(Filter::records_by_namespace(make_namespace(1)))?;
+    assert!(results.is_empty());
 
-    match storage.get(Filter::RecordsByNamespace(make_namespace(2)))? {
-        Retrieved::Records(records) => assert_eq!(records.len(), 1),
-        _ => panic!("Expected Records"),
-    }
+    let results = storage.get(Filter::records_by_namespace(make_namespace(2)))?;
+    assert_eq!(results.len(), 1);
 
     Ok(())
 }
@@ -268,8 +243,10 @@ fn test_batch_put_and_get() -> Result<()> {
 
     storage.put(Storable::Batch(batch))?;
 
-    match storage.get(Filter::Batch(batch_id))? {
-        Retrieved::Batch(Some(b)) => {
+    let results = storage.get(Filter::batch(batch_id))?;
+    assert_eq!(results.len(), 1);
+    match &results[0] {
+        Storable::Batch(b) => {
             assert_eq!(b.batch_id, batch_id);
             assert_eq!(b.time_start, 1000);
             assert_eq!(b.time_end, 2000);
@@ -285,125 +262,8 @@ fn test_batch_put_and_get() -> Result<()> {
 fn test_batch_get_nonexistent() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
-    match storage.get(Filter::Batch([0xFFu8; 16]))? {
-        Retrieved::Batch(None) => {}
-        _ => panic!("Expected None"),
-    }
-
-    Ok(())
-}
-
-#[test]
-fn test_batch_update_status() -> Result<()> {
-    let (storage, _temp) = create_test_storage();
-
-    let batch = make_batch(1, 1000, 2000, 500);
-    let batch_id = batch.batch_id;
-
-    storage.put(Storable::Batch(batch))?;
-
-    storage.update(Updatable::BatchStatus {
-        batch_id,
-        status: BatchStatus::Processing,
-        timestamp: 600,
-    })?;
-
-    match storage.get(Filter::Batch(batch_id))? {
-        Retrieved::Batch(Some(b)) => {
-            assert_eq!(b.status, BatchStatus::Processing);
-            assert_eq!(b.updated_at, 600);
-        }
-        _ => panic!("Expected Batch"),
-    }
-
-    Ok(())
-}
-
-#[test]
-fn test_batch_update_record_count() -> Result<()> {
-    let (storage, _temp) = create_test_storage();
-
-    let batch = make_batch(1, 1000, 2000, 500);
-    let batch_id = batch.batch_id;
-
-    storage.put(Storable::Batch(batch))?;
-
-    storage.update(Updatable::BatchRecordCount {
-        batch_id,
-        count: 42,
-        timestamp: 600,
-    })?;
-
-    match storage.get(Filter::Batch(batch_id))? {
-        Retrieved::Batch(Some(b)) => {
-            assert_eq!(b.record_count, 42);
-        }
-        _ => panic!("Expected Batch"),
-    }
-
-    Ok(())
-}
-
-#[test]
-fn test_batch_mark_committed() -> Result<()> {
-    let (storage, _temp) = create_test_storage();
-
-    let batch = make_batch(1, 1000, 2000, 500);
-    let batch_id = batch.batch_id;
-    let commitment_id = [0xABu8; 32];
-
-    storage.put(Storable::Batch(batch))?;
-
-    storage.update(Updatable::BatchCommitted {
-        batch_id,
-        commitment_id,
-        timestamp: 600,
-    })?;
-
-    match storage.get(Filter::Batch(batch_id))? {
-        Retrieved::Batch(Some(b)) => {
-            assert_eq!(b.status, BatchStatus::Committed);
-            assert_eq!(b.commitment_id, Some(commitment_id));
-        }
-        _ => panic!("Expected Batch"),
-    }
-
-    Ok(())
-}
-
-#[test]
-fn test_batch_query_by_status() -> Result<()> {
-    let (storage, _temp) = create_test_storage();
-
-    let batch1 = make_batch(1, 1000, 2000, 500);
-    let batch2 = make_batch(2, 2000, 3000, 500);
-    let batch1_id = batch1.batch_id;
-    let batch2_id = batch2.batch_id;
-
-    storage.put(Storable::Batch(batch1))?;
-    storage.put(Storable::Batch(batch2))?;
-
-    storage.update(Updatable::BatchStatus {
-        batch_id: batch2_id,
-        status: BatchStatus::Processing,
-        timestamp: 600,
-    })?;
-
-    match storage.get(Filter::BatchByStatus(BatchStatus::Pending))? {
-        Retrieved::Batches(batches) => {
-            assert_eq!(batches.len(), 1);
-            assert_eq!(batches[0].batch_id, batch1_id);
-        }
-        _ => panic!("Expected Batches"),
-    }
-
-    match storage.get(Filter::BatchByStatus(BatchStatus::Processing))? {
-        Retrieved::Batches(batches) => {
-            assert_eq!(batches.len(), 1);
-            assert_eq!(batches[0].batch_id, batch2_id);
-        }
-        _ => panic!("Expected Batches"),
-    }
+    let results = storage.get(Filter::batch([0xFFu8; 16]))?;
+    assert!(results.is_empty());
 
     Ok(())
 }
@@ -416,10 +276,8 @@ fn test_batch_list_all() -> Result<()> {
     storage.put(Storable::Batch(make_batch(2, 2000, 3000, 500)))?;
     storage.put(Storable::Batch(make_batch(3, 3000, 4000, 500)))?;
 
-    match storage.get(Filter::BatchAll)? {
-        Retrieved::Batches(batches) => assert_eq!(batches.len(), 3),
-        _ => panic!("Expected Batches"),
-    }
+    let results = storage.get(Filter::batch_all())?;
+    assert_eq!(results.len(), 3);
 
     Ok(())
 }
@@ -438,10 +296,8 @@ fn test_batch_get_records() -> Result<()> {
     let batch_id = batch.batch_id;
     storage.put(Storable::Batch(batch))?;
 
-    match storage.get(Filter::BatchRecords(batch_id))? {
-        Retrieved::Records(records) => assert_eq!(records.len(), 2),
-        _ => panic!("Expected Records"),
-    }
+    let results = storage.get(Filter::batch_records(batch_id))?;
+    assert_eq!(results.len(), 2);
 
     Ok(())
 }
@@ -455,13 +311,11 @@ fn test_batch_delete() -> Result<()> {
 
     storage.put(Storable::Batch(batch))?;
 
-    let deleted = storage.delete(Filter::Batch(batch_id))?;
+    let deleted = storage.delete(Filter::batch(batch_id))?;
     assert!(deleted);
 
-    match storage.get(Filter::Batch(batch_id))? {
-        Retrieved::Batch(None) => {}
-        _ => panic!("Expected None"),
-    }
+    let results = storage.get(Filter::batch(batch_id))?;
+    assert!(results.is_empty());
 
     Ok(())
 }
@@ -476,12 +330,13 @@ fn test_commitment_put_and_get() -> Result<()> {
 
     let commitment = make_commitment(1, 1, [0x01u8; 16], 100, 3000);
 
-    let result = storage.put(Storable::Commitment(commitment.clone()))?;
-    assert!(result.is_some());
-    let commitment_id = result.unwrap();
+    storage.put(Storable::Commitment(commitment.clone()))?;
+    let commitment_id = commitment_id_from_root(&commitment.root);
 
-    match storage.get(Filter::Commitment(commitment_id))? {
-        Retrieved::Commitment(Some(c)) => {
+    let results = storage.get(Filter::commitment(commitment_id))?;
+    assert_eq!(results.len(), 1);
+    match &results[0] {
+        Storable::Commitment(c) => {
             assert_eq!(c.record_count, 100);
             assert_eq!(c.committed_at, 3000);
         }
@@ -495,10 +350,8 @@ fn test_commitment_put_and_get() -> Result<()> {
 fn test_commitment_get_nonexistent() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
-    match storage.get(Filter::Commitment([0xFFu8; 32]))? {
-        Retrieved::Commitment(None) => {}
-        _ => panic!("Expected None"),
-    }
+    let results = storage.get(Filter::commitment([0xFFu8; 32]))?;
+    assert!(results.is_empty());
 
     Ok(())
 }
@@ -510,10 +363,8 @@ fn test_commitment_list_all() -> Result<()> {
     storage.put(Storable::Commitment(make_commitment(1, 1, [0x01u8; 16], 10, 1000)))?;
     storage.put(Storable::Commitment(make_commitment(2, 2, [0x02u8; 16], 20, 2000)))?;
 
-    match storage.get(Filter::CommitmentAll)? {
-        Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 2),
-        _ => panic!("Expected Commitments"),
-    }
+    let results = storage.get(Filter::commitment_all())?;
+    assert_eq!(results.len(), 2);
 
     Ok(())
 }
@@ -525,10 +376,8 @@ fn test_commitment_by_namespace() -> Result<()> {
     storage.put(Storable::Commitment(make_commitment(1, 1, [0x01u8; 16], 10, 1000)))?;
     storage.put(Storable::Commitment(make_commitment(2, 2, [0x02u8; 16], 20, 2000)))?;
 
-    match storage.get(Filter::CommitmentByNamespace(make_namespace(1)))? {
-        Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 1),
-        _ => panic!("Expected Commitments"),
-    }
+    let results = storage.get(Filter::commitment_by_namespace(make_namespace(1)))?;
+    assert_eq!(results.len(), 1);
 
     Ok(())
 }
@@ -541,15 +390,13 @@ fn test_commitment_by_time_range() -> Result<()> {
     storage.put(Storable::Commitment(make_commitment(2, 1, [0x02u8; 16], 20, 2000)))?;
     storage.put(Storable::Commitment(make_commitment(3, 1, [0x03u8; 16], 30, 3000)))?;
 
-    match storage.get(Filter::CommitmentByTimeRange {
-        start: 1500,
-        end: 2500,
-    })? {
-        Retrieved::Commitments(commitments) => {
-            assert_eq!(commitments.len(), 1);
-            assert_eq!(commitments[0].1.committed_at, 2000);
+    let results = storage.get(Filter::commitment_by_time_range(1500, 2500))?;
+    assert_eq!(results.len(), 1);
+    match &results[0] {
+        Storable::Commitment(c) => {
+            assert_eq!(c.committed_at, 2000);
         }
-        _ => panic!("Expected Commitments"),
+        _ => panic!("Expected Commitment"),
     }
 
     Ok(())
@@ -560,15 +407,14 @@ fn test_commitment_delete() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
     let commitment = make_commitment(1, 1, [0x01u8; 16], 100, 3000);
-    let commitment_id = storage.put(Storable::Commitment(commitment))?.unwrap();
+    let commitment_id = commitment_id_from_root(&commitment.root);
+    storage.put(Storable::Commitment(commitment))?;
 
-    let deleted = storage.delete(Filter::Commitment(commitment_id))?;
+    let deleted = storage.delete(Filter::commitment(commitment_id))?;
     assert!(deleted);
 
-    match storage.get(Filter::Commitment(commitment_id))? {
-        Retrieved::Commitment(None) => {}
-        _ => panic!("Expected None"),
-    }
+    let results = storage.get(Filter::commitment(commitment_id))?;
+    assert!(results.is_empty());
 
     Ok(())
 }
@@ -587,37 +433,27 @@ fn test_storage_isolation() -> Result<()> {
     storage.put(Storable::Commitment(make_commitment(1, 1, [0x01u8; 16], 10, 3000)))?;
 
     // Verify each storage has its own data
-    match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
-        Retrieved::Records(records) => assert_eq!(records.len(), 1),
-        _ => panic!("Expected Records"),
-    }
+    let results = storage.get(Filter::records_by_namespace(make_namespace(1)))?;
+    assert_eq!(results.len(), 1);
 
-    match storage.get(Filter::BatchAll)? {
-        Retrieved::Batches(batches) => assert_eq!(batches.len(), 1),
-        _ => panic!("Expected Batches"),
-    }
+    let results = storage.get(Filter::batch_all())?;
+    assert_eq!(results.len(), 1);
 
-    match storage.get(Filter::CommitmentAll)? {
-        Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 1),
-        _ => panic!("Expected Commitments"),
-    }
+    let results = storage.get(Filter::commitment_all())?;
+    assert_eq!(results.len(), 1);
 
     // Delete records, others should remain
-    storage.delete(Filter::RecordsByFilter(StorageQueryFilter {
+    storage.delete(Filter::records_by_query(StorageQueryFilter {
         namespace: make_namespace(1),
         time_range: None,
         key: None,
     }))?;
 
-    match storage.get(Filter::BatchAll)? {
-        Retrieved::Batches(batches) => assert_eq!(batches.len(), 1),
-        _ => panic!("Expected Batches"),
-    }
+    let results = storage.get(Filter::batch_all())?;
+    assert_eq!(results.len(), 1);
 
-    match storage.get(Filter::CommitmentAll)? {
-        Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 1),
-        _ => panic!("Expected Commitments"),
-    }
+    let results = storage.get(Filter::commitment_all())?;
+    assert_eq!(results.len(), 1);
 
     Ok(())
 }
@@ -639,97 +475,16 @@ fn test_storage_persistence() -> Result<()> {
     {
         let storage = StorageManager::open(path)?;
 
-        match storage.get(Filter::RecordsByNamespace(make_namespace(1)))? {
-            Retrieved::Records(records) => assert_eq!(records.len(), 1),
-            _ => panic!("Expected Records"),
-        }
+        let results = storage.get(Filter::records_by_namespace(make_namespace(1)))?;
+        assert_eq!(results.len(), 1);
 
-        match storage.get(Filter::BatchAll)? {
-            Retrieved::Batches(batches) => assert_eq!(batches.len(), 1),
-            _ => panic!("Expected Batches"),
-        }
+        let results = storage.get(Filter::batch_all())?;
+        assert_eq!(results.len(), 1);
 
-        match storage.get(Filter::CommitmentAll)? {
-            Retrieved::Commitments(commitments) => assert_eq!(commitments.len(), 1),
-            _ => panic!("Expected Commitments"),
-        }
+        let results = storage.get(Filter::commitment_all())?;
+        assert_eq!(results.len(), 1);
     }
 
     Ok(())
 }
 
-#[test]
-fn test_full_workflow() -> Result<()> {
-    let (storage, _temp) = create_test_storage();
-
-    // 1. Store records
-    storage.put(Storable::Record(make_record(1, 1, "data1", 1500)))?;
-    storage.put(Storable::Record(make_record(1, 2, "data2", 1600)))?;
-    storage.put(Storable::Record(make_record(1, 3, "data3", 1700)))?;
-
-    // 2. Create batch
-    let batch = make_batch(1, 1000, 2000, 500);
-    let batch_id = batch.batch_id;
-    storage.put(Storable::Batch(batch))?;
-
-    // 3. Get batch records
-    let record_count = match storage.get(Filter::BatchRecords(batch_id))? {
-        Retrieved::Records(records) => records.len() as u64,
-        _ => 0,
-    };
-    assert_eq!(record_count, 3);
-
-    // 4. Update batch status
-    storage.update(Updatable::BatchStatus {
-        batch_id,
-        status: BatchStatus::Processing,
-        timestamp: 600,
-    })?;
-
-    // 5. Update record count
-    storage.update(Updatable::BatchRecordCount {
-        batch_id,
-        count: record_count,
-        timestamp: 700,
-    })?;
-
-    // 6. Store commitment
-    let commitment = StoredCommitment {
-        root: vec![0xDE, 0xAD, 0xBE, 0xEF],
-        namespaces: vec![make_namespace(1)],
-        batch_id,
-        time_start: 1000,
-        time_end: 2000,
-        record_count,
-        committed_at: 800,
-        proofs: HashMap::new(),
-    };
-    let commitment_id = storage.put(Storable::Commitment(commitment))?.unwrap();
-
-    // 7. Mark batch as committed
-    storage.update(Updatable::BatchCommitted {
-        batch_id,
-        commitment_id,
-        timestamp: 800,
-    })?;
-
-    // 8. Verify final state
-    match storage.get(Filter::Batch(batch_id))? {
-        Retrieved::Batch(Some(b)) => {
-            assert_eq!(b.status, BatchStatus::Committed);
-            assert_eq!(b.record_count, 3);
-            assert_eq!(b.commitment_id, Some(commitment_id));
-        }
-        _ => panic!("Expected Batch"),
-    }
-
-    match storage.get(Filter::Commitment(commitment_id))? {
-        Retrieved::Commitment(Some(c)) => {
-            assert_eq!(c.record_count, 3);
-            assert_eq!(c.batch_id, batch_id);
-        }
-        _ => panic!("Expected Commitment"),
-    }
-
-    Ok(())
-}
