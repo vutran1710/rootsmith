@@ -118,46 +118,49 @@ impl StorageManager {
     /// Get items from the appropriate storage.
     pub fn get(&self, filter: Filter) -> Result<Vec<Storable>> {
         match filter.entity {
-            Entity::Record => {
-                if let (Some(namespace), Some(key)) = (&filter.namespace, &filter.key) {
-                    if let Some(timestamp) = filter.timestamp {
-                        let record = self.records.get_version(namespace, key, timestamp)?;
-                        Ok(record.into_iter().map(Storable::Record).collect())
-                    } else {
-                        let records = self.records.get_all_versions(namespace, key)?;
-                        Ok(records.into_iter().map(Storable::Record).collect())
-                    }
-                } else if filter.namespace.is_some() {
+            Entity::Record => match (&filter.namespace, &filter.key, filter.timestamp) {
+                (Some(ns), Some(key), Some(ts)) => {
+                    let record = self.records.get_version(ns, key, ts)?;
+                    Ok(record.into_iter().map(Storable::Record).collect())
+                }
+                (Some(ns), Some(key), None) => {
+                    let records = self.records.get_all_versions(ns, key)?;
+                    Ok(records.into_iter().map(Storable::Record).collect())
+                }
+                (Some(_), None, _) => {
                     let records = self.records.query(&filter)?;
                     Ok(records.into_iter().map(Storable::Record).collect())
-                } else {
-                    Err(anyhow::anyhow!("Invalid record filter"))
                 }
-            }
-            Entity::Batch => {
-                if let Some(batch_id) = filter.batch_id {
-                    let batch = self.batches.get(&batch_id)?;
+                _ => Err(anyhow::anyhow!("Record filter requires a namespace")),
+            },
+            Entity::Batch => match filter.batch_id {
+                Some(id) => {
+                    let batch = self.batches.get(&id)?;
                     Ok(batch.into_iter().map(Storable::Batch).collect())
-                } else {
+                }
+                None => {
                     let batches = self.batches.list_all()?;
                     Ok(batches.into_iter().map(Storable::Batch).collect())
                 }
-            }
-            Entity::Commitment => {
-                if let Some(commitment_id) = filter.commitment_id {
-                    let commitment = self.commitments.get(&commitment_id)?;
-                    Ok(commitment.into_iter().map(Storable::Commitment).collect())
-                } else if let Some(namespace) = &filter.namespace {
-                    let commitments = self.commitments.get_by_namespace(namespace)?;
-                    Ok(commitments.into_iter().map(|(_, c)| Storable::Commitment(c)).collect())
-                } else if let (Some(start), Some(end)) = (filter.time_start, filter.time_end) {
-                    let commitments = self.commitments.query_by_time_range(start, end)?;
-                    Ok(commitments.into_iter().map(|(_, c)| Storable::Commitment(c)).collect())
-                } else {
-                    let commitments = self.commitments.list_all()?;
-                    Ok(commitments.into_iter().map(|(_, c)| Storable::Commitment(c)).collect())
+            },
+            Entity::Commitment => match (filter.commitment_id, &filter.namespace, filter.time_start, filter.time_end) {
+                (Some(id), _, _, _) => {
+                    let c = self.commitments.get(&id)?;
+                    Ok(c.into_iter().map(Storable::Commitment).collect())
                 }
-            }
+                (None, Some(ns), _, _) => {
+                    let cs = self.commitments.get_by_namespace(ns)?;
+                    Ok(cs.into_iter().map(|(_, c)| Storable::Commitment(c)).collect())
+                }
+                (None, None, Some(start), Some(end)) => {
+                    let cs = self.commitments.query_by_time_range(start, end)?;
+                    Ok(cs.into_iter().map(|(_, c)| Storable::Commitment(c)).collect())
+                }
+                _ => {
+                    let cs = self.commitments.list_all()?;
+                    Ok(cs.into_iter().map(|(_, c)| Storable::Commitment(c)).collect())
+                }
+            },
         }
     }
 
