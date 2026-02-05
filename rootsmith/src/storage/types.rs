@@ -4,7 +4,6 @@ use crate::types::Record;
 
 use super::BatchId;
 use super::BatchMetadata;
-use super::BatchStatus;
 use super::CommitmentId;
 use super::StoredCommitment;
 
@@ -26,6 +25,7 @@ pub enum Entity {
 
 /// Query for finding items in the database.
 /// Used by both `get` and `delete` operations.
+/// Fields map to RocksDB key components and range bounds.
 #[derive(Debug, Clone)]
 pub struct Filter {
     pub entity: Entity,
@@ -34,10 +34,8 @@ pub struct Filter {
     pub timestamp: Option<u64>,
     pub batch_id: Option<BatchId>,
     pub commitment_id: Option<CommitmentId>,
-    pub status: Option<BatchStatus>,
     pub time_start: Option<u64>,
     pub time_end: Option<u64>,
-    pub all_versions: bool,
 }
 
 impl Filter {
@@ -50,14 +48,12 @@ impl Filter {
             timestamp: None,
             batch_id: None,
             commitment_id: None,
-            status: None,
             time_start: None,
             time_end: None,
-            all_versions: false,
         }
     }
 
-    /// Find record by namespace, key, and timestamp.
+    /// Get record by namespace, key, and exact timestamp.
     pub fn record(namespace: Namespace, key: Key16, timestamp: u64) -> Self {
         Self {
             namespace: Some(namespace),
@@ -67,8 +63,8 @@ impl Filter {
         }
     }
 
-    /// Find latest record by namespace and key.
-    pub fn record_latest(namespace: Namespace, key: Key16) -> Self {
+    /// Scan all versions of a record by namespace and key.
+    pub fn record_by_key(namespace: Namespace, key: Key16) -> Self {
         Self {
             namespace: Some(namespace),
             key: Some(key),
@@ -76,17 +72,7 @@ impl Filter {
         }
     }
 
-    /// Find all versions of a record.
-    pub fn record_all_versions(namespace: Namespace, key: Key16) -> Self {
-        Self {
-            namespace: Some(namespace),
-            key: Some(key),
-            all_versions: true,
-            ..Self::new(Entity::Record)
-        }
-    }
-
-    /// Find all records in a namespace.
+    /// Scan all records in a namespace.
     pub fn records_by_namespace(namespace: Namespace) -> Self {
         Self {
             namespace: Some(namespace),
@@ -94,7 +80,7 @@ impl Filter {
         }
     }
 
-    /// Find records by time range within a namespace.
+    /// Scan records by time range within a namespace.
     pub fn records_by_time_range(namespace: Namespace, start: u64, end: u64) -> Self {
         Self {
             namespace: Some(namespace),
@@ -104,15 +90,7 @@ impl Filter {
         }
     }
 
-    /// Find records belonging to a batch.
-    pub fn batch_records(batch_id: BatchId) -> Self {
-        Self {
-            batch_id: Some(batch_id),
-            ..Self::new(Entity::Record)
-        }
-    }
-
-    /// Find batch by ID.
+    /// Get batch by ID.
     pub fn batch(batch_id: BatchId) -> Self {
         Self {
             batch_id: Some(batch_id),
@@ -120,20 +98,12 @@ impl Filter {
         }
     }
 
-    /// Find all batches.
+    /// Scan all batches.
     pub fn batch_all() -> Self {
         Self::new(Entity::Batch)
     }
 
-    /// Find batches by status.
-    pub fn batch_by_status(status: BatchStatus) -> Self {
-        Self {
-            status: Some(status),
-            ..Self::new(Entity::Batch)
-        }
-    }
-
-    /// Find commitment by ID.
+    /// Get commitment by ID.
     pub fn commitment(commitment_id: CommitmentId) -> Self {
         Self {
             commitment_id: Some(commitment_id),
@@ -141,12 +111,12 @@ impl Filter {
         }
     }
 
-    /// Find all commitments.
+    /// Scan all commitments.
     pub fn commitment_all() -> Self {
         Self::new(Entity::Commitment)
     }
 
-    /// Find commitments by namespace.
+    /// Scan commitments by namespace index.
     pub fn commitment_by_namespace(namespace: Namespace) -> Self {
         Self {
             namespace: Some(namespace),
@@ -154,7 +124,7 @@ impl Filter {
         }
     }
 
-    /// Find commitments by time range.
+    /// Scan commitments by time range index.
     pub fn commitment_by_time_range(start: u64, end: u64) -> Self {
         Self {
             time_start: Some(start),

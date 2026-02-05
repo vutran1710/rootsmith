@@ -119,19 +119,13 @@ impl StorageManager {
     pub fn get(&self, filter: Filter) -> Result<Vec<Storable>> {
         match filter.entity {
             Entity::Record => {
-                if let Some(batch_id) = filter.batch_id {
-                    let records = self.batches.get_records(&batch_id, &self.records)?;
-                    Ok(records.into_iter().map(Storable::Record).collect())
-                } else if let (Some(namespace), Some(key)) = (&filter.namespace, &filter.key) {
+                if let (Some(namespace), Some(key)) = (&filter.namespace, &filter.key) {
                     if let Some(timestamp) = filter.timestamp {
                         let record = self.records.get_version(namespace, key, timestamp)?;
                         Ok(record.into_iter().map(Storable::Record).collect())
-                    } else if filter.all_versions {
+                    } else {
                         let records = self.records.get_all_versions(namespace, key)?;
                         Ok(records.into_iter().map(Storable::Record).collect())
-                    } else {
-                        let record = self.records.get_latest(namespace, key)?;
-                        Ok(record.into_iter().map(Storable::Record).collect())
                     }
                 } else if filter.namespace.is_some() {
                     let records = self.records.query(&filter)?;
@@ -144,9 +138,6 @@ impl StorageManager {
                 if let Some(batch_id) = filter.batch_id {
                     let batch = self.batches.get(&batch_id)?;
                     Ok(batch.into_iter().map(Storable::Batch).collect())
-                } else if let Some(status) = filter.status {
-                    let batches = self.batches.query_by_status(status)?;
-                    Ok(batches.into_iter().map(Storable::Batch).collect())
                 } else {
                     let batches = self.batches.list_all()?;
                     Ok(batches.into_iter().map(Storable::Batch).collect())

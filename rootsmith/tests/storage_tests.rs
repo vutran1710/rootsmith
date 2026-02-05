@@ -104,21 +104,26 @@ fn test_record_put_and_get() -> Result<()> {
 }
 
 #[test]
-fn test_record_get_latest() -> Result<()> {
+fn test_record_get_by_key() -> Result<()> {
     let (storage, _temp) = create_test_storage();
 
     storage.put(Storable::Record(make_record(1, 1, "v1", 1000)))?;
     storage.put(Storable::Record(make_record(1, 1, "v2", 2000)))?;
     storage.put(Storable::Record(make_record(1, 1, "v3", 1500)))?;
 
-    let results = storage.get(Filter::record_latest(make_namespace(1), make_key(1)))?;
-    assert_eq!(results.len(), 1);
-    match &results[0] {
-        Storable::Record(r) => {
-            assert_eq!(r.timestamp, 2000);
-        }
-        _ => panic!("Expected Record"),
-    }
+    let results = storage.get(Filter::record_by_key(make_namespace(1), make_key(1)))?;
+    assert_eq!(results.len(), 3);
+
+    // Caller picks latest by max timestamp
+    let latest = results
+        .iter()
+        .filter_map(|s| match s {
+            Storable::Record(r) => Some(r),
+            _ => None,
+        })
+        .max_by_key(|r| r.timestamp)
+        .unwrap();
+    assert_eq!(latest.timestamp, 2000);
 
     Ok(())
 }
@@ -131,7 +136,7 @@ fn test_record_get_all_versions() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 1, "v2", 2000)))?;
     storage.put(Storable::Record(make_record(1, 1, "v3", 3000)))?;
 
-    let results = storage.get(Filter::record_all_versions(make_namespace(1), make_key(1)))?;
+    let results = storage.get(Filter::record_by_key(make_namespace(1), make_key(1)))?;
     assert_eq!(results.len(), 3);
 
     Ok(())
@@ -266,26 +271,6 @@ fn test_batch_list_all() -> Result<()> {
 
     let results = storage.get(Filter::batch_all())?;
     assert_eq!(results.len(), 3);
-
-    Ok(())
-}
-
-#[test]
-fn test_batch_get_records() -> Result<()> {
-    let (storage, _temp) = create_test_storage();
-
-    // Store records
-    storage.put(Storable::Record(make_record(1, 1, "r1", 1500)))?;
-    storage.put(Storable::Record(make_record(1, 2, "r2", 1800)))?;
-    storage.put(Storable::Record(make_record(1, 3, "r3", 2500)))?; // Outside time range
-
-    // Create batch
-    let batch = make_batch(1, 1000, 2000, 500);
-    let batch_id = batch.batch_id;
-    storage.put(Storable::Batch(batch))?;
-
-    let results = storage.get(Filter::batch_records(batch_id))?;
-    assert_eq!(results.len(), 2);
 
     Ok(())
 }
