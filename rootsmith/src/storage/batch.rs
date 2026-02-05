@@ -15,7 +15,8 @@ use crate::types::Namespace;
 use crate::types::Record;
 
 use super::RecordStorage;
-use super::StorageQueryFilter;
+use super::types::Entity;
+use super::types::Filter;
 use super::BATCH_PREFIX;
 
 pub type BatchId = [u8; 16];
@@ -191,10 +192,11 @@ impl BatchStorage {
         let mut records = Vec::new();
 
         for namespace in &metadata.namespaces {
-            let filter = StorageQueryFilter {
-                namespace: *namespace,
-                time_range: Some((metadata.time_start, metadata.time_end)),
-                key: None,
+            let filter = Filter {
+                namespace: Some(*namespace),
+                time_start: Some(metadata.time_start),
+                time_end: Some(metadata.time_end),
+                ..Filter::new(Entity::Record)
             };
             let namespace_records = record_storage.query(&filter)?;
             records.extend(namespace_records);

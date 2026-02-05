@@ -13,6 +13,7 @@ use crate::types::Namespace;
 use crate::types::Record;
 use crate::types::UpstreamData;
 
+use super::types::Filter;
 use super::RECORD_PREFIX;
 
 mod key_layout {
@@ -33,13 +34,6 @@ mod key_layout {
 use key_layout::*;
 
 type StorageKey = [u8; TOTAL_SIZE];
-
-#[derive(Debug, Clone)]
-pub struct StorageQueryFilter {
-    pub namespace: Namespace,
-    pub time_range: Option<(u64, u64)>,
-    pub key: Option<Key16>,
-}
 
 #[derive(Serialize, Deserialize)]
 struct PackedValue {
@@ -221,33 +215,7 @@ impl RecordStorage {
         Ok(results)
     }
 
-    pub fn query_namespace(&self, namespace: &Namespace) -> Result<Vec<Record>> {
-        let mut prefix = [0u8; NAMESPACE_PREFIX_SIZE];
-        prefix[0] = RECORD_PREFIX;
-        prefix[1..NAMESPACE_PREFIX_SIZE].copy_from_slice(namespace);
-
-        let mut results = Vec::new();
-        let iter = self.db.prefix_iterator(&prefix);
-
-        for item in iter {
-            let (k, value) = item?;
-            if !k.starts_with(&prefix) {
-                break;
-            }
-            let mut storage_key = [0u8; TOTAL_SIZE];
-            storage_key.copy_from_slice(&k);
-            let record: Record = StoredRecord {
-                key: storage_key,
-                value: value.to_vec(),
-            }
-            .into();
-            results.push(record);
-        }
-
-        Ok(results)
-    }
-
-    pub fn query(&self, filter: &StorageQueryFilter) -> Result<Vec<Record>> {
+    pub fn query(&self, filter: &Filter) -> Result<Vec<Record>> {
         let prefix = self.build_prefix(filter)?;
         let mut results = Vec::new();
 
@@ -274,14 +242,14 @@ impl RecordStorage {
         Ok(results)
     }
 
-    pub fn delete(&self, filter: &StorageQueryFilter) -> Result<u64> {
+    pub fn delete(&self, filter: &Filter) -> Result<u64> {
         let prefix = self.build_prefix(filter)?;
         let mut count = 0;
         let mut batch = WriteBatch::default();
         let iter = self.db.prefix_iterator(&prefix);
 
         for item in iter {
-            let (k, _value) = item?;
+            let (k, value) = item?;
             if !k.starts_with(&prefix) {
                 break;
             }
@@ -290,7 +258,7 @@ impl RecordStorage {
             storage_key.copy_from_slice(&k);
             let record: Record = StoredRecord {
                 key: storage_key,
-                value: _value.to_vec(),
+                value: value.to_vec(),
             }
             .into();
 
@@ -307,33 +275,38 @@ impl RecordStorage {
         Ok(count)
     }
 
-    fn build_prefix(&self, filter: &StorageQueryFilter) -> Result<Vec<u8>> {
+    fn build_prefix(&self, filter: &Filter) -> Result<Vec<u8>> {
+        let namespace = filter.namespace.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Record query requires a namespace"))?;
+
         if let Some(key) = &filter.key {
             let mut prefix = [0u8; NAMESPACE_KEY_PREFIX_SIZE];
             prefix[0] = RECORD_PREFIX;
-            prefix[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(&filter.namespace);
+            prefix[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(namespace);
             prefix[KEY_OFFSET..NAMESPACE_KEY_PREFIX_SIZE].copy_from_slice(key);
             Ok(prefix.to_vec())
         } else {
             let mut prefix = [0u8; NAMESPACE_PREFIX_SIZE];
             prefix[0] = RECORD_PREFIX;
-            prefix[1..NAMESPACE_PREFIX_SIZE].copy_from_slice(&filter.namespace);
+            prefix[1..NAMESPACE_PREFIX_SIZE].copy_from_slice(namespace);
             Ok(prefix.to_vec())
         }
     }
 
-    fn matches_filter(&self, record: &Record, filter: &StorageQueryFilter) -> bool {
-        if record.namespace != filter.namespace {
-            return false;
+    fn matches_filter(&self, record: &Record, filter: &Filter) -> bool {
+        if let Some(namespace) = &filter.namespace {
+            if record.namespace != *namespace {
+                return false;
+            }
         }
 
-        if let Some(ref key) = filter.key {
+        if let Some(key) = &filter.key {
             if record.key != *key {
                 return false;
             }
         }
 
-        if let Some((start, end)) = filter.time_range {
+        if let (Some(start), Some(end)) = (filter.time_start, filter.time_end) {
             if record.timestamp < start || record.timestamp > end {
                 return false;
             }

@@ -6,7 +6,6 @@ use super::BatchId;
 use super::BatchMetadata;
 use super::BatchStatus;
 use super::CommitmentId;
-use super::StorageQueryFilter;
 use super::StoredCommitment;
 
 /// Items that can be stored in the database.
@@ -38,7 +37,6 @@ pub struct Filter {
     pub status: Option<BatchStatus>,
     pub time_start: Option<u64>,
     pub time_end: Option<u64>,
-    pub query: Option<StorageQueryFilter>,
     pub all_versions: bool,
 }
 
@@ -55,7 +53,6 @@ impl Filter {
             status: None,
             time_start: None,
             time_end: None,
-            query: None,
             all_versions: false,
         }
     }
@@ -97,10 +94,12 @@ impl Filter {
         }
     }
 
-    /// Find records matching a query filter.
-    pub fn records_by_query(query: StorageQueryFilter) -> Self {
+    /// Find records by time range within a namespace.
+    pub fn records_by_time_range(namespace: Namespace, start: u64, end: u64) -> Self {
         Self {
-            query: Some(query),
+            namespace: Some(namespace),
+            time_start: Some(start),
+            time_end: Some(end),
             ..Self::new(Entity::Record)
         }
     }

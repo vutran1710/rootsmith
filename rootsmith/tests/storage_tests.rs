@@ -5,7 +5,7 @@ use tempfile::TempDir;
 
 use rootsmith::storage::{
     commitment_id_from_root, generate_batch_id, BatchMetadata, BatchStatus, Filter, Storable,
-    StorageManager, StorageQueryFilter, StoredCommitment,
+    StorageManager, StoredCommitment,
 };
 use rootsmith::types::{Key16, Namespace, Record, UpstreamData};
 
@@ -186,13 +186,7 @@ fn test_records_query_by_filter() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 2, "middle", 2000)))?;
     storage.put(Storable::Record(make_record(1, 3, "late", 3000)))?;
 
-    let filter = StorageQueryFilter {
-        namespace: make_namespace(1),
-        time_range: Some((1500, 2500)),
-        key: None,
-    };
-
-    let results = storage.get(Filter::records_by_query(filter))?;
+    let results = storage.get(Filter::records_by_time_range(make_namespace(1), 1500, 2500))?;
     assert_eq!(results.len(), 1);
     match &results[0] {
         Storable::Record(r) => {
@@ -212,13 +206,7 @@ fn test_records_delete() -> Result<()> {
     storage.put(Storable::Record(make_record(1, 2, "r2", 1000)))?;
     storage.put(Storable::Record(make_record(2, 1, "r3", 1000)))?;
 
-    let filter = StorageQueryFilter {
-        namespace: make_namespace(1),
-        time_range: None,
-        key: None,
-    };
-
-    let deleted = storage.delete(Filter::records_by_query(filter))?;
+    let deleted = storage.delete(Filter::records_by_namespace(make_namespace(1)))?;
     assert!(deleted);
 
     let results = storage.get(Filter::records_by_namespace(make_namespace(1)))?;
@@ -443,11 +431,7 @@ fn test_storage_isolation() -> Result<()> {
     assert_eq!(results.len(), 1);
 
     // Delete records, others should remain
-    storage.delete(Filter::records_by_query(StorageQueryFilter {
-        namespace: make_namespace(1),
-        time_range: None,
-        key: None,
-    }))?;
+    storage.delete(Filter::records_by_namespace(make_namespace(1)))?;
 
     let results = storage.get(Filter::batch_all())?;
     assert_eq!(results.len(), 1);

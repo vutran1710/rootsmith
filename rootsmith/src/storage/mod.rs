@@ -40,7 +40,6 @@ pub use commitment::StoredCommitment;
 
 // Record types and storage
 pub use record::RecordStorage;
-pub use record::StorageQueryFilter;
 
 // Storage operation types
 pub use types::Entity;
@@ -123,9 +122,6 @@ impl StorageManager {
                 if let Some(batch_id) = filter.batch_id {
                     let records = self.batches.get_records(&batch_id, &self.records)?;
                     Ok(records.into_iter().map(Storable::Record).collect())
-                } else if let Some(query) = filter.query {
-                    let records = self.records.query(&query)?;
-                    Ok(records.into_iter().map(Storable::Record).collect())
                 } else if let (Some(namespace), Some(key)) = (&filter.namespace, &filter.key) {
                     if let Some(timestamp) = filter.timestamp {
                         let record = self.records.get_version(namespace, key, timestamp)?;
@@ -137,8 +133,8 @@ impl StorageManager {
                         let record = self.records.get_latest(namespace, key)?;
                         Ok(record.into_iter().map(Storable::Record).collect())
                     }
-                } else if let Some(namespace) = &filter.namespace {
-                    let records = self.records.query_namespace(namespace)?;
+                } else if filter.namespace.is_some() {
+                    let records = self.records.query(&filter)?;
                     Ok(records.into_iter().map(Storable::Record).collect())
                 } else {
                     Err(anyhow::anyhow!("Invalid record filter"))
@@ -179,11 +175,11 @@ impl StorageManager {
     pub fn delete(&self, filter: Filter) -> Result<bool> {
         match filter.entity {
             Entity::Record => {
-                if let Some(query) = filter.query {
-                    let count = self.records.delete(&query)?;
+                if filter.namespace.is_some() {
+                    let count = self.records.delete(&filter)?;
                     Ok(count > 0)
                 } else {
-                    Err(anyhow::anyhow!("Record delete requires a query filter"))
+                    Err(anyhow::anyhow!("Record delete requires a namespace"))
                 }
             }
             Entity::Batch => {
