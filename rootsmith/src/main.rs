@@ -7,7 +7,6 @@ use tracing::info;
 use rootsmith::config::Config;
 use rootsmith::rootsmith::RootSmith;
 use rootsmith::telemetry;
-use rootsmith::wasm_host::WasmBuilder;
 
 #[derive(Parser, Debug)]
 #[command(name = "rootsmith")]
@@ -39,22 +38,11 @@ async fn main() -> Result<()> {
 
     info!("Loaded configuration: {:?}", config);
 
-    let source_path = PathBuf::from(&config.source_path);
-    let output_dir = PathBuf::from("./examples/output");
-
-    if !source_path.exists() {
-        anyhow::bail!("Source file not found: {:?}", source_path);
-    }
-
-    info!("Building WASM plugin from: {:?}", source_path);
-    let wasm_path = WasmBuilder::build(&source_path, &output_dir)?;
-    info!("Built WASM plugin: {:?}", wasm_path);
-
-    let mut rootsmith = RootSmith::initialize(config, wasm_path).await;
+    let mut rootsmith = RootSmith::initialize(config).await?;
     tracing::info!("RootSmith initialized successfully");
 
-    return rootsmith.run().await.map_err(|e| {
+    rootsmith.run().await.map_err(|e| {
         tracing::error!("RootSmith encountered an error: {:?}", e);
         e
-    });
+    })
 }

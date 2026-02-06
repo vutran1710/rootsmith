@@ -1,6 +1,7 @@
 //! Core RootSmith struct and initialization - no business logic.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -16,7 +17,7 @@ use crate::types::Namespace;
 use crate::types::UpstreamData;
 use crate::upstream::UpstreamConnector;
 use crate::upstream::UpstreamVariant;
-use crate::wasm_host::WasmPluginHost;
+use crate::wasm_host::{WasmBuilder, WasmPluginHost};
 
 /// Epoch phase for the commit cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,8 +74,20 @@ pub struct RootSmith {
 }
 
 impl RootSmith {
-    /// Initialize RootSmith with default Noop implementations.
-    pub async fn initialize(config: Config, wasm_path: std::path::PathBuf) -> Self {
+    /// Initialize RootSmith with configuration only.
+    /// Builds the WASM plugin from source_path specified in config.
+    pub async fn initialize(config: Config) -> anyhow::Result<Self> {
+        let source_path = PathBuf::from(&config.source_path);
+        let output_dir = PathBuf::from(&config.wasm_output_dir);
+
+        if !source_path.exists() {
+            anyhow::bail!("Source file not found: {:?}", source_path);
+        }
+
+        tracing::info!("Building WASM plugin from: {:?}", source_path);
+        let wasm_path = WasmBuilder::build(&source_path, &output_dir)?;
+        tracing::info!("Built WASM plugin: {:?}", wasm_path);
+
         let storage = StorageManager::open(&config.storage_path).expect("Failed to open storage");
         tracing::info!("Storage opened at: {}", config.storage_path);
 
@@ -86,7 +99,7 @@ impl RootSmith {
             .expect("Failed to load WASM plugin");
         let accumulator = AccumulatorVariant::new(&config.accumulator);
 
-        Self {
+        Ok(Self {
             webserver: Some(webserver),
             upstream,
             downstream,
@@ -103,7 +116,7 @@ impl RootSmith {
             committed_records: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             wasm_host: tokio::sync::Mutex::new(wasm_host),
             accumulator: Arc::new(tokio::sync::Mutex::new(accumulator)),
-        }
+        })
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {

@@ -1,6 +1,7 @@
 storage_path = "./data"
 http_port = 9000
 source_path = "./examples/plugin/src/client.rs"
+wasm_output_dir = "./examples/output"
 
 [upstream.http]
 port = 8000

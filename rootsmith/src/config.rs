@@ -14,6 +14,8 @@ pub struct Config {
 
     pub source_path: String,
 
+    pub wasm_output_dir: String,
+
     pub accumulator: AccumulatorConfig,
 
     pub archive: ArchiveConfig,
@@ -28,6 +30,7 @@ impl Default for Config {
             storage_path: "./data".to_string(),
             http_port: 9000,
             source_path: "./examples/plugin/src/lib.rs".to_string(),
+            wasm_output_dir: "./examples/output".to_string(),
             upstream: UpstreamConfig::Http {
                 port: 8080,
                 api_key: None,
