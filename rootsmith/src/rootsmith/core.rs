@@ -10,7 +10,7 @@ use crate::accumulator::AccumulatorVariant;
 use crate::archiver::ArchiveVariant;
 use crate::config::Config;
 use crate::downstream::DownstreamVariant;
-use crate::server::{admin, Webserver};
+use crate::server::{admin, webhook, Webserver};
 use crate::storage::Storable;
 use crate::storage::StorageManager;
 use crate::types::Namespace;
@@ -90,8 +90,18 @@ impl RootSmith {
 
         let storage = StorageManager::open(&config.storage_path).expect("Failed to open storage");
         tracing::info!("Storage opened at: {}", config.storage_path);
+        let storage = Arc::new(tokio::sync::Mutex::new(storage));
 
-        let webserver = Webserver::new(config.http_port).register(admin::routes());
+        // Create webhook state with shared storage
+        let webhook_state = webhook::WebhookState {
+            storage: Arc::clone(&storage),
+        };
+
+        // Register both admin and webhook routes on the same server
+        let webserver = Webserver::new(config.http_port)
+            .register(admin::routes())
+            .register(webhook::routes(webhook_state));
+
         let upstream = UpstreamVariant::new(config.upstream.clone());
         let downstream = DownstreamVariant::new(config.downstream.clone());
         let archive_storage = ArchiveVariant::new(config.archive.clone());
@@ -105,7 +115,7 @@ impl RootSmith {
             downstream,
             archive_storage,
             config,
-            storage: Arc::new(tokio::sync::Mutex::new(storage)),
+            storage,
             epoch_start_ts: Arc::new(tokio::sync::Mutex::new(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
