@@ -6,13 +6,14 @@ use std::sync::Arc;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use crate::accumulator::Accumulator;
 use crate::accumulator::AccumulatorVariant;
 use crate::archiver::ArchiveVariant;
 use crate::config::Config;
 use crate::downstream::DownstreamVariant;
 use crate::server::{admin, webhook, Webserver};
-use crate::storage::Storable;
-use crate::storage::StorageManager;
+use crate::storage::{generate_batch_id, BatchStatus, Storable, StorageManager};
+use crate::types::CommitmentResult;
 use crate::types::Namespace;
 use crate::types::UpstreamData;
 use crate::upstream::UpstreamConnector;
@@ -161,5 +162,124 @@ impl RootSmith {
         }
 
         self.upstream.close().await
+    }
+
+    /// Commit a batch of records for the given namespaces and time range.
+    ///
+    /// This function:
+    /// 1. Creates a batch from stored records within the time range
+    /// 2. Sends records to the accumulator
+    /// 3. For external services: links the job_id for webhook tracking
+    /// 4. For local accumulators: stores the commitment result immediately
+    ///
+    /// Returns the batch_id on success.
+    pub async fn commit_batch(
+        &self,
+        namespaces: Vec<Namespace>,
+        time_start: u64,
+        time_end: u64,
+    ) -> anyhow::Result<[u8; 16]> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before UNIX_EPOCH")
+            .as_secs();
+
+        // Generate deterministic batch_id
+        let batch_id = generate_batch_id(&namespaces, time_start, time_end);
+        tracing::info!(
+            "Creating batch: id={} namespaces={} time_range=[{}, {}]",
+            hex::encode(&batch_id[..8]),
+            namespaces.len(),
+            time_start,
+            time_end
+        );
+
+        let storage = self.storage.lock().await;
+
+        // Create batch metadata
+        storage
+            .batches()
+            .create(batch_id, namespaces.clone(), time_start, time_end, now)?;
+
+        // Query records for this batch
+        let records = storage.batches().get_records(&batch_id, storage.records())?;
+        let record_count = records.len() as u64;
+
+        tracing::info!(
+            "Batch {} has {} records",
+            hex::encode(&batch_id[..8]),
+            record_count
+        );
+
+        if records.is_empty() {
+            tracing::warn!("No records found for batch, skipping commit");
+            storage
+                .batches()
+                .update_status(&batch_id, BatchStatus::Failed, now)?;
+            return Ok(batch_id);
+        }
+
+        // Update record count
+        storage
+            .batches()
+            .update_record_count(&batch_id, record_count, now)?;
+
+        // Create channel for commitment result (used by local accumulators)
+        let (result_tx, result_rx) = kanal::unbounded_async::<CommitmentResult>();
+
+        // Submit to accumulator
+        let accumulator = self.accumulator.lock().await;
+        let job_id = accumulator.commit(&records, result_tx).await?;
+
+        drop(accumulator); // Release lock before potentially blocking
+
+        match job_id {
+            Some(external_job_id) => {
+                // External service: link job_id for webhook tracking
+                tracing::info!(
+                    "External job submitted: job_id={} batch_id={}",
+                    external_job_id,
+                    hex::encode(&batch_id[..8])
+                );
+
+                storage
+                    .batches()
+                    .set_external_job_id(&batch_id, &external_job_id, now)?;
+
+                // Commitment result will arrive via webhook
+            }
+            None => {
+                // Local accumulator: result available immediately via channel
+                let result = result_rx
+                    .recv()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to receive commitment result: {}", e))?;
+
+                tracing::info!(
+                    "Local commitment complete: root={} items={}",
+                    hex::encode(&result.commitment.root[..8]),
+                    result.item_count
+                );
+
+                // Store commitment
+                let commitment_id = storage.commitments().store(
+                    result.commitment.root,
+                    result.commitment.namespaces,
+                    batch_id,
+                    time_start,
+                    time_end,
+                    record_count,
+                    result.timestamp,
+                    result.proofs,
+                )?;
+
+                // Mark batch as committed
+                storage
+                    .batches()
+                    .mark_committed(&batch_id, &commitment_id, now)?;
+            }
+        }
+
+        Ok(batch_id)
     }
 }
