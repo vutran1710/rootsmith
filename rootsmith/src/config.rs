@@ -21,7 +21,8 @@ pub struct Config {
     pub archive: ArchiveConfig,
 
     pub downstream: DownstreamConfig,
-    // TODO: rest goes here
+
+    pub epoch_duration_secs: u64,
 }
 
 impl Default for Config {
@@ -40,6 +41,7 @@ impl Default for Config {
                 directory: "./archive".to_string(),
             },
             downstream: DownstreamConfig::Blackhole,
+            epoch_duration_secs: 60,
         }
     }
 }

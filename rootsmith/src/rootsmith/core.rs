@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
@@ -131,10 +132,62 @@ impl RootSmith {
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        // Start HTTP server
         if let Some(webserver) = self.webserver.take() {
             tokio::spawn(webserver.run());
         }
+
+        let epoch_duration = Duration::from_secs(self.config.epoch_duration_secs);
+        let storage = Arc::clone(&self.storage);
+        let accumulator = Arc::clone(&self.accumulator);
+        let epoch_start_ts = Arc::clone(&self.epoch_start_ts);
+        let active_namespaces = Arc::clone(&self.active_namespaces);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(epoch_duration).await;
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("System time before UNIX_EPOCH")
+                    .as_secs();
+
+                let mut epoch_start = epoch_start_ts.lock().await;
+                let mut namespaces_map = active_namespaces.lock().await;
+
+                let namespaces: Vec<Namespace> = namespaces_map.keys().cloned().collect();
+
+                if namespaces.is_empty() {
+                    tracing::debug!("No active namespaces, skipping epoch commit");
+                    *epoch_start = now;
+                    continue;
+                }
+
+                let time_start = *epoch_start;
+                let time_end = now;
+
+                tracing::info!(
+                    "Epoch commit: namespaces={} time_range=[{}, {}]",
+                    namespaces.len(),
+                    time_start,
+                    time_end
+                );
+
+                if let Err(e) = Self::do_commit_batch(
+                    &storage,
+                    &accumulator,
+                    namespaces,
+                    time_start,
+                    time_end,
+                )
+                .await
+                {
+                    tracing::error!("Epoch commit failed: {}", e);
+                }
+
+                namespaces_map.clear();
+                *epoch_start = now;
+            }
+        });
 
         let (tx, rx) = kanal::unbounded_async::<UpstreamData>();
 
@@ -153,6 +206,11 @@ impl RootSmith {
                         hex::encode(&record.key[..8])
                     );
 
+                    {
+                        let mut namespaces = self.active_namespaces.lock().await;
+                        namespaces.insert(record.namespace, true);
+                    }
+
                     let storage = self.storage.lock().await;
                     storage.put(Storable::Record(record))?;
                     tracing::info!("Stored in RocksDB");
@@ -164,17 +222,9 @@ impl RootSmith {
         self.upstream.close().await
     }
 
-    /// Commit a batch of records for the given namespaces and time range.
-    ///
-    /// This function:
-    /// 1. Creates a batch from stored records within the time range
-    /// 2. Sends records to the accumulator
-    /// 3. For external services: links the job_id for webhook tracking
-    /// 4. For local accumulators: stores the commitment result immediately
-    ///
-    /// Returns the batch_id on success.
-    pub async fn commit_batch(
-        &self,
+    async fn do_commit_batch(
+        storage: &Arc<tokio::sync::Mutex<StorageManager>>,
+        accumulator: &Arc<tokio::sync::Mutex<AccumulatorVariant>>,
         namespaces: Vec<Namespace>,
         time_start: u64,
         time_end: u64,
@@ -184,7 +234,6 @@ impl RootSmith {
             .expect("System time before UNIX_EPOCH")
             .as_secs();
 
-        // Generate deterministic batch_id
         let batch_id = generate_batch_id(&namespaces, time_start, time_end);
         tracing::info!(
             "Creating batch: id={} namespaces={} time_range=[{}, {}]",
@@ -194,14 +243,12 @@ impl RootSmith {
             time_end
         );
 
-        let storage = self.storage.lock().await;
+        let storage = storage.lock().await;
 
-        // Create batch metadata
         storage
             .batches()
             .create(batch_id, namespaces.clone(), time_start, time_end, now)?;
 
-        // Query records for this batch
         let records = storage.batches().get_records(&batch_id, storage.records())?;
         let record_count = records.len() as u64;
 
@@ -219,23 +266,18 @@ impl RootSmith {
             return Ok(batch_id);
         }
 
-        // Update record count
         storage
             .batches()
             .update_record_count(&batch_id, record_count, now)?;
 
-        // Create channel for commitment result (used by local accumulators)
         let (result_tx, result_rx) = kanal::unbounded_async::<CommitmentResult>();
 
-        // Submit to accumulator
-        let accumulator = self.accumulator.lock().await;
-        let job_id = accumulator.commit(&records, result_tx).await?;
-
-        drop(accumulator); // Release lock before potentially blocking
+        let acc = accumulator.lock().await;
+        let job_id = acc.commit(&records, result_tx).await?;
+        drop(acc);
 
         match job_id {
             Some(external_job_id) => {
-                // External service: link job_id for webhook tracking
                 tracing::info!(
                     "External job submitted: job_id={} batch_id={}",
                     external_job_id,
@@ -245,11 +287,8 @@ impl RootSmith {
                 storage
                     .batches()
                     .set_external_job_id(&batch_id, &external_job_id, now)?;
-
-                // Commitment result will arrive via webhook
             }
             None => {
-                // Local accumulator: result available immediately via channel
                 let result = result_rx
                     .recv()
                     .await
@@ -261,7 +300,6 @@ impl RootSmith {
                     result.item_count
                 );
 
-                // Store commitment
                 let commitment_id = storage.commitments().store(
                     result.commitment.root,
                     result.commitment.namespaces,
@@ -273,7 +311,6 @@ impl RootSmith {
                     result.proofs,
                 )?;
 
-                // Mark batch as committed
                 storage
                     .batches()
                     .mark_committed(&batch_id, &commitment_id, now)?;
@@ -281,5 +318,15 @@ impl RootSmith {
         }
 
         Ok(batch_id)
+    }
+
+    pub async fn commit_batch(
+        &self,
+        namespaces: Vec<Namespace>,
+        time_start: u64,
+        time_end: u64,
+    ) -> anyhow::Result<[u8; 16]> {
+        Self::do_commit_batch(&self.storage, &self.accumulator, namespaces, time_start, time_end)
+            .await
     }
 }
