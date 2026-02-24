@@ -60,12 +60,16 @@ def send_webhook_callback(webhook_url: str, job_id: str):
     """Send commitment result back to rootsmith via webhook."""
     time.sleep(1)  # Simulate processing time
 
+    # Commitment.root expects Vec<u8> = JSON array of bytes, not hex string
+    root_hex = "deadbeefcafe1234567890abcdef"
+    root_bytes = list(bytes.fromhex(root_hex.ljust(64, "0")[:64]))  # 32 bytes
+
     timestamp = int(time.time())
     payload = {
         "job_id": job_id,
         "status": "success",
         "commitment": {
-            "root": "deadbeefcafe1234567890abcdef",
+            "root": root_bytes,
             "namespaces": [],
             "committed_at": timestamp
         },

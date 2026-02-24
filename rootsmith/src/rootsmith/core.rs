@@ -320,14 +320,4 @@ impl RootSmith {
 
         Ok(batch_id)
     }
-
-    pub async fn commit_batch(
-        &self,
-        namespaces: Vec<Namespace>,
-        time_start: u64,
-        time_end: u64,
-    ) -> anyhow::Result<[u8; 16]> {
-        Self::do_commit_batch(&self.storage, &self.accumulator, namespaces, time_start, time_end)
-            .await
-    }
 }

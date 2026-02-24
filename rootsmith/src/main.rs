@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::info;
 
+use rootsmith::accumulator::AccumulatorConfig;
 use rootsmith::config::Config;
 use rootsmith::rootsmith::RootSmith;
 use rootsmith::telemetry;
@@ -37,6 +38,11 @@ async fn main() -> Result<()> {
     };
 
     info!("Loaded configuration: {:?}", config);
+    match &config.accumulator {
+        AccumulatorConfig::Merkle => info!("Using accumulator: merkle (local)"),
+        AccumulatorConfig::SparseMerkle => info!("Using accumulator: sparse_merkle (local)"),
+        AccumulatorConfig::External(_) => info!("Using accumulator: external (webhook flow)"),
+    }
 
     let mut rootsmith = RootSmith::initialize(config).await?;
     tracing::info!("RootSmith initialized successfully");

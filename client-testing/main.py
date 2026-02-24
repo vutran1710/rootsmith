@@ -114,9 +114,15 @@ def send_test_data():
     if not samples:
         return False
 
+    # Use current timestamps so records fall within epoch's time range
+    # (batch queries by time_start <= record.timestamp <= time_end)
+    base_ts = int(time.time())
     print(f"Sending {len(samples)} records from sample-data.json to rootsmith upstream...")
     success_count = 0
     for i, payload in enumerate(samples):
+        # Override timestamp so it falls within the next epoch window
+        payload = dict(payload)
+        payload["timestamp"] = base_ts - (len(samples) - i)
         try:
             req = Request(
                 ROOTSMITH_UPSTREAM_URL,

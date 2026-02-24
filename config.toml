@@ -1,13 +1,20 @@
 storage_path = "./data"
-epoch_duration_secs = 60
+epoch_duration_secs = 10
 http_port = 9000
+client_callback_url = "http://localhost:3001/webhook"
 source_path = "./examples/plugin/src/client.rs"
 wasm_output_dir = "./examples/output"
 
 [upstream.http]
 port = 8000
 
-[accumulator.merkle]
+[accumulator.external]
+wire_format = "Protobuf"
+
+[accumulator.external.transport.http]
+base_url = "http://localhost:3000"
+endpoint = "/commit"
+headers = {}
 
 [archive.file]
 directory = "./archive"
