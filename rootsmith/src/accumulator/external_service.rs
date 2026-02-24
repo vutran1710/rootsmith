@@ -31,6 +31,7 @@ pub struct HttpTransportConfig {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum TransportConfig {
+    #[serde(rename = "http")]
     Http(HttpTransportConfig),
 }
 
@@ -56,7 +57,7 @@ impl ExternalServiceAccumulator {
                         .iter()
                         .map(|(k, v)| (k.parse().unwrap(), v.parse().unwrap())),
                 );
-                let client = HttpClient::new(&http_config.endpoint, headers)
+                let client = HttpClient::new(&http_config.base_url, headers)
                     .expect("Failed to create HTTP client");
                 Transport::Http(client)
             }

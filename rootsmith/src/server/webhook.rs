@@ -13,6 +13,8 @@ use crate::types::CommitmentResult;
 #[derive(Clone)]
 pub struct WebhookState {
     pub storage: Arc<Mutex<StorageManager>>,
+    /// Optional URL to POST commitment result when webhook is processed (e.g. for integration testing).
+    pub client_callback_url: Option<String>,
 }
 
 /// Job status reported by external service.
@@ -103,7 +105,7 @@ async fn handle_commitment(
                     batch.time_end,
                     result.item_count,
                     now,
-                    result.proofs,
+                    result.proofs.clone(),
                 )
                 .map_err(|e| storage_error(&e))?;
 
@@ -119,6 +121,23 @@ async fn handle_commitment(
                 hex::encode(&batch.batch_id),
                 hex::encode(&commitment_id[..8])
             );
+
+            // Notify client if callback URL is configured
+            if let Some(ref callback_url) = state.client_callback_url {
+                let job_id = payload.job_id.clone();
+                let batch_id = batch.batch_id;
+                let commitment_id_copy = commitment_id;
+                let result_clone = result.clone();
+                let url = callback_url.clone();
+                tokio::spawn(async move {
+                    if let Err(e) =
+                        notify_client(&url, &job_id, &batch_id, &commitment_id_copy, &result_clone)
+                            .await
+                    {
+                        tracing::warn!("Failed to notify client at {}: {}", url, e);
+                    }
+                });
+            }
 
             Ok(Json(WebhookResponse {
                 accepted: true,
@@ -153,6 +172,33 @@ async fn handle_commitment(
             }))
         }
     }
+}
+
+/// Payload sent to client callback URL when commitment is processed.
+#[derive(Serialize)]
+struct ClientCallbackPayload {
+    job_id: String,
+    batch_id: Vec<u8>,
+    commitment_id: Vec<u8>,
+    commitment: CommitmentResult,
+}
+
+async fn notify_client(
+    url: &str,
+    job_id: &str,
+    batch_id: &[u8; 16],
+    commitment_id: &[u8; 32],
+    result: &CommitmentResult,
+) -> Result<(), reqwest::Error> {
+    let payload = ClientCallbackPayload {
+        job_id: job_id.to_string(),
+        batch_id: batch_id.to_vec(),
+        commitment_id: commitment_id.to_vec(),
+        commitment: result.clone(),
+    };
+    let client = reqwest::Client::new();
+    client.post(url).json(&payload).send().await?;
+    Ok(())
 }
 
 fn current_timestamp() -> u64 {

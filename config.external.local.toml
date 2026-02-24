@@ -1,0 +1,22 @@
+# Config for testing with external accumulator (local dev, not docker)
+storage_path = "./data"
+http_port = 9000
+source_path = "./examples/plugin/src/client.rs"
+wasm_output_dir = "./examples/output"
+epoch_duration_secs = 10
+
+[upstream.http]
+port = 8000
+
+[accumulator.external]
+wire_format = "Protobuf"
+
+[accumulator.external.transport.http]
+base_url = "http://localhost:3000"
+endpoint = "/commit"
+headers = {}
+
+[archive.file]
+directory = "./archive"
+
+[downstream.blackhole]

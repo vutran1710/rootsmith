@@ -1,0 +1,41 @@
+# Build artifacts
+target/
+**/target/
+
+# Data and runtime
+data/
+*.db
+*.log
+
+# Git
+.git/
+.gitignore
+
+# IDE and editor
+.vscode/
+.idea/
+.cursor/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Large artifacts
+artifacts/
+*.zkey
+*.bin
+
+# Test and temp
+test_data/
+*.tmp
+.cargo/config.toml.local

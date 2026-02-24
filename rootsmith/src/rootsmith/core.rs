@@ -97,6 +97,7 @@ impl RootSmith {
         // Create webhook state with shared storage
         let webhook_state = webhook::WebhookState {
             storage: Arc::clone(&storage),
+            client_callback_url: config.client_callback_url.clone(),
         };
 
         // Register both admin and webhook routes on the same server

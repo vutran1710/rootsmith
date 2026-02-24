@@ -1,4 +1,5 @@
 storage_path = "./data"
+epoch_duration_secs = 60
 http_port = 9000
 source_path = "./examples/plugin/src/client.rs"
 wasm_output_dir = "./examples/output"

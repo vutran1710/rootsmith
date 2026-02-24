@@ -1,0 +1,12 @@
+[
+  {"user_id": "user-001", "event_type": "click", "timestamp": 1708704000, "data": "button_submit"},
+  {"user_id": "user-001", "event_type": "page_view", "timestamp": 1708704060, "data": "/dashboard"},
+  {"user_id": "user-002", "event_type": "signup", "timestamp": 1708704120, "data": "email_verified"},
+  {"user_id": "user-002", "event_type": "login", "timestamp": 1708704180, "data": "oauth_google"},
+  {"user_id": "user-003", "event_type": "purchase", "timestamp": 1708704240, "data": "order_12345"},
+  {"user_id": "user-003", "event_type": "click", "timestamp": 1708704300, "data": "add_to_cart"},
+  {"user_id": "user-004", "event_type": "page_view", "timestamp": 1708704360, "data": "/products"},
+  {"user_id": "user-005", "event_type": "logout", "timestamp": 1708704420, "data": "session_expired"},
+  {"user_id": "user-001", "event_type": "api_call", "timestamp": 1708704480, "data": "GET /api/health"},
+  {"user_id": "user-004", "event_type": "search", "timestamp": 1708704540, "data": "query=test"}
+]

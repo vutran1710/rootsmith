@@ -23,6 +23,10 @@ pub struct Config {
     pub downstream: DownstreamConfig,
 
     pub epoch_duration_secs: u64,
+
+    /// Optional URL for rootsmith to POST commitment results (e.g. for integration testing).
+    #[serde(default)]
+    pub client_callback_url: Option<String>,
 }
 
 impl Default for Config {
@@ -42,6 +46,7 @@ impl Default for Config {
             },
             downstream: DownstreamConfig::Blackhole,
             epoch_duration_secs: 60,
+            client_callback_url: None,
         }
     }
 }

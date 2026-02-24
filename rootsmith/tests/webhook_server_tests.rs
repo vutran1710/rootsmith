@@ -34,7 +34,10 @@ fn make_namespace(ns: u8) -> Namespace {
 }
 
 fn make_webhook_state(storage: Arc<Mutex<StorageManager>>) -> WebhookState {
-    WebhookState { storage }
+    WebhookState {
+        storage,
+        client_callback_url: None,
+    }
 }
 
 fn current_timestamp() -> u64 {
