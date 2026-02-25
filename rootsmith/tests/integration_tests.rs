@@ -216,6 +216,7 @@ async fn test_external_accumulator_flow_with_webhook() {
     let state = WebhookState {
         storage: Arc::clone(&storage),
         client_callback_url: None,
+        archive_storage: None,
     };
     let app = webhook::routes(state);
 

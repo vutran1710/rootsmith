@@ -37,6 +37,7 @@ fn make_webhook_state(storage: Arc<Mutex<StorageManager>>) -> WebhookState {
     WebhookState {
         storage,
         client_callback_url: None,
+        archive_storage: None,
     }
 }
 

@@ -1,13 +1,16 @@
 //! Webhook handler for receiving commitment results from external services.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+
 
 use axum::{extract::State, http::StatusCode, routing::post, Json, Router};
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
+use crate::archiver::{ArchiveData, ArchiveStorage, ArchiveVariant};
 use crate::storage::{BatchStatus, StorageManager};
-use crate::types::CommitmentResult;
+use crate::types::{CommitmentResult, Record};
 
 /// Shared state for webhook handlers.
 #[derive(Clone)]
@@ -15,6 +18,8 @@ pub struct WebhookState {
     pub storage: Arc<Mutex<StorageManager>>,
     /// Optional URL to POST commitment result when webhook is processed (e.g. for integration testing).
     pub client_callback_url: Option<String>,
+    /// Archive storage for archiving records after commit.
+    pub archive_storage: Option<Arc<ArchiveVariant>>,
 }
 
 /// Job status reported by external service.
@@ -122,6 +127,21 @@ async fn handle_commitment(
                 hex::encode(&commitment_id[..8])
             );
 
+            // Archive records per namespace if archive storage is configured
+            if let Some(ref archive) = state.archive_storage {
+                let records = storage
+                    .batches()
+                    .get_records(&batch.batch_id, storage.records())
+                    .map_err(|e| storage_error(&e))?;
+                let archive = Arc::clone(archive);
+                let time_end = batch.time_end;
+                tokio::spawn(async move {
+                    if let Err(e) = archive_records(&*archive, &records, time_end).await {
+                        tracing::warn!("Archive failed: {}", e);
+                    }
+                });
+            }
+
             // Notify client if callback URL is configured
             if let Some(ref callback_url) = state.client_callback_url {
                 let job_id = payload.job_id.clone();
@@ -198,6 +218,25 @@ async fn notify_client(
     };
     let client = reqwest::Client::new();
     client.post(url).json(&payload).send().await?;
+    Ok(())
+}
+
+/// Archive records grouped by namespace.
+async fn archive_records(
+    archive: &dyn ArchiveStorage,
+    records: &[Record],
+    timestamp: u64,
+) -> anyhow::Result<()> {
+    let mut by_ns: HashMap<[u8; 16], Vec<Record>> = HashMap::new();
+    for r in records {
+        by_ns.entry(r.namespace)
+            .or_default()
+            .push(r.clone());
+    }
+    for (ns, recs) in by_ns {
+        let data = ArchiveData::Json(serde_json::to_value(recs)?);
+        archive.archive(ns, timestamp, data).await?;
+    }
     Ok(())
 }
 
