@@ -31,6 +31,7 @@ pub struct HttpTransportConfig {
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub enum TransportConfig {
+    #[serde(rename = "http")]
     Http(HttpTransportConfig),
 }
 
@@ -56,7 +57,7 @@ impl ExternalServiceAccumulator {
                         .iter()
                         .map(|(k, v)| (k.parse().unwrap(), v.parse().unwrap())),
                 );
-                let client = HttpClient::new(&http_config.endpoint, headers)
+                let client = HttpClient::new(&http_config.base_url, headers)
                     .expect("Failed to create HTTP client");
                 Transport::Http(client)
             }
@@ -81,7 +82,7 @@ impl Accumulator for ExternalServiceAccumulator {
         &self,
         records: &[Record],
         _result_tx: AsyncSender<CommitmentResult>,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         match (&self.transport, &self.wire_format) {
             (Transport::Http(ref client), &WireFormat::Protobuf) => {
                 tracing::info_span!("ExternalServiceAccumulator::commit");
@@ -112,11 +113,8 @@ impl Accumulator for ExternalServiceAccumulator {
 
                 tracing::info!("Submitted job to external service: job_id={}", job_id);
 
-                // TODO: register job_id to track status and get commitment result later
-                // There are different ways to handle this, such as:
-                // 1. Spawn a short-lived webserver to receive webhook callbacks from the external service
-                // 2. Use the main webserver to handle webhook callbacks (requires coordination with other parts of the system)
-                Ok(())
+                // Return job_id so caller can link it to batch for webhook tracking
+                Ok(Some(job_id))
             }
         }
     }

@@ -25,11 +25,17 @@ pub trait Accumulator: Send + Sync {
         unimplemented!()
     }
 
+    /// Commit records to the accumulator.
+    ///
+    /// Returns `Ok(Some(job_id))` for external services that return a job ID for tracking.
+    /// Returns `Ok(None)` for local accumulators that produce immediate results.
+    ///
+    /// For external services, the actual commitment result arrives via webhook callback.
     async fn commit(
         &self,
         records: &[Record],
         result_tx: AsyncSender<CommitmentResult>,
-    ) -> Result<()>;
+    ) -> Result<Option<String>>;
 }
 
 /// Enum representing all possible accumulator implementations.
@@ -76,7 +82,7 @@ impl Accumulator for AccumulatorVariant {
         &self,
         records: &[Record],
         result_tx: AsyncSender<CommitmentResult>,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         match self {
             AccumulatorVariant::Merkle(inner) => inner.commit(records, result_tx).await,
             AccumulatorVariant::SparseMerkle(inner) => inner.commit(records, result_tx).await,

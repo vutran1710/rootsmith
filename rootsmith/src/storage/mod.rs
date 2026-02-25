@@ -19,6 +19,7 @@ pub(crate) const BATCH_PREFIX: u8 = 0x02;
 pub(crate) const COMMITMENT_PREFIX: u8 = 0x03;
 pub(crate) const COMMITMENT_NS_INDEX: u8 = 0x04;
 pub(crate) const COMMITMENT_TIME_INDEX: u8 = 0x05;
+pub(crate) const JOB_INDEX_PREFIX: u8 = 0x07;
 
 mod batch;
 mod commitment;
@@ -191,5 +192,20 @@ impl StorageManager {
                 }
             }
         }
+    }
+
+    /// Access batch storage directly.
+    pub fn batches(&self) -> &BatchStorage {
+        &self.batches
+    }
+
+    /// Access commitment storage directly.
+    pub fn commitments(&self) -> &CommitmentStorage {
+        &self.commitments
+    }
+
+    /// Access record storage directly.
+    pub fn records(&self) -> &RecordStorage {
+        &self.records
     }
 }

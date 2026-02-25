@@ -60,6 +60,7 @@ fn make_batch(ns: u8, time_start: u64, time_end: u64, created_at: u64) -> BatchM
         created_at,
         updated_at: created_at,
         commitment_id: None,
+        external_job_id: None,
     }
 }
 

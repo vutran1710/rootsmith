@@ -1,22 +1,24 @@
 //! Core RootSmith struct and initialization - no business logic.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 
+use crate::accumulator::Accumulator;
 use crate::accumulator::AccumulatorVariant;
-use crate::archiver::ArchiveVariant;
+use crate::archiver::{ArchiveData, ArchiveStorage, ArchiveVariant};
 use crate::config::Config;
 use crate::downstream::DownstreamVariant;
-use crate::server::{admin, Webserver};
-use crate::storage::Storable;
-use crate::storage::StorageManager;
-use crate::types::Namespace;
+use crate::server::{admin, webhook, Webserver};
+use crate::storage::{generate_batch_id, BatchStatus, Storable, StorageManager};
+use crate::types::{CommitmentResult, Namespace, Record};
 use crate::types::UpstreamData;
 use crate::upstream::UpstreamConnector;
 use crate::upstream::UpstreamVariant;
-use crate::wasm_host::WasmPluginHost;
+use crate::wasm_host::{WasmBuilder, WasmPluginHost};
 
 /// Epoch phase for the commit cycle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -48,7 +50,7 @@ pub struct RootSmith {
     pub downstream: DownstreamVariant,
 
     /// Archive storage implementation.
-    pub archive_storage: ArchiveVariant,
+    pub archive_storage: Arc<ArchiveVariant>,
 
     /// Global/base configuration.
     pub config: Config,
@@ -73,26 +75,50 @@ pub struct RootSmith {
 }
 
 impl RootSmith {
-    /// Initialize RootSmith with default Noop implementations.
-    pub async fn initialize(config: Config, wasm_path: std::path::PathBuf) -> Self {
+    /// Initialize RootSmith with configuration only.
+    /// Builds the WASM plugin from source_path specified in config.
+    pub async fn initialize(config: Config) -> anyhow::Result<Self> {
+        let source_path = PathBuf::from(&config.source_path);
+        let output_dir = PathBuf::from(&config.wasm_output_dir);
+
+        if !source_path.exists() {
+            anyhow::bail!("Source file not found: {:?}", source_path);
+        }
+
+        tracing::info!("Building WASM plugin from: {:?}", source_path);
+        let wasm_path = WasmBuilder::build(&source_path, &output_dir)?;
+        tracing::info!("Built WASM plugin: {:?}", wasm_path);
+
         let storage = StorageManager::open(&config.storage_path).expect("Failed to open storage");
         tracing::info!("Storage opened at: {}", config.storage_path);
+        let storage = Arc::new(tokio::sync::Mutex::new(storage));
 
-        let webserver = Webserver::new(config.http_port).register(admin::routes());
         let upstream = UpstreamVariant::new(config.upstream.clone());
         let downstream = DownstreamVariant::new(config.downstream.clone());
-        let archive_storage = ArchiveVariant::new(config.archive.clone());
+        let archive_storage = Arc::new(ArchiveVariant::new(config.archive.clone()));
+
+        // Create webhook state with shared storage
+        let webhook_state = webhook::WebhookState {
+            storage: Arc::clone(&storage),
+            client_callback_url: config.client_callback_url.clone(),
+            archive_storage: Some(Arc::clone(&archive_storage)),
+        };
+
+        // Register both admin and webhook routes on the same server
+        let webserver = Webserver::new(config.http_port)
+            .register(admin::routes())
+            .register(webhook::routes(webhook_state));
         let wasm_host = WasmPluginHost::load(wasm_path.to_str().unwrap(), None)
             .expect("Failed to load WASM plugin");
         let accumulator = AccumulatorVariant::new(&config.accumulator);
 
-        Self {
+        Ok(Self {
             webserver: Some(webserver),
             upstream,
             downstream,
             archive_storage,
             config,
-            storage: Arc::new(tokio::sync::Mutex::new(storage)),
+            storage,
             epoch_start_ts: Arc::new(tokio::sync::Mutex::new(
                 SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -103,14 +129,73 @@ impl RootSmith {
             committed_records: Arc::new(tokio::sync::Mutex::new(Vec::new())),
             wasm_host: tokio::sync::Mutex::new(wasm_host),
             accumulator: Arc::new(tokio::sync::Mutex::new(accumulator)),
-        }
+        })
     }
 
     pub async fn run(&mut self) -> anyhow::Result<()> {
-        // Start HTTP server
         if let Some(webserver) = self.webserver.take() {
             tokio::spawn(webserver.run());
         }
+
+        // Initialize archive storage
+        if let Err(e) = ArchiveStorage::open(self.archive_storage.as_ref()).await {
+            tracing::warn!("Archive storage open failed: {}", e);
+        }
+
+        let epoch_duration = Duration::from_secs(self.config.epoch_duration_secs);
+        let storage = Arc::clone(&self.storage);
+        let accumulator = Arc::clone(&self.accumulator);
+        let archive_storage = Arc::clone(&self.archive_storage);
+        let epoch_start_ts = Arc::clone(&self.epoch_start_ts);
+        let active_namespaces = Arc::clone(&self.active_namespaces);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(epoch_duration).await;
+
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .expect("System time before UNIX_EPOCH")
+                    .as_secs();
+
+                let mut epoch_start = epoch_start_ts.lock().await;
+                let mut namespaces_map = active_namespaces.lock().await;
+
+                let namespaces: Vec<Namespace> = namespaces_map.keys().cloned().collect();
+
+                if namespaces.is_empty() {
+                    tracing::debug!("No active namespaces, skipping epoch commit");
+                    *epoch_start = now;
+                    continue;
+                }
+
+                let time_start = *epoch_start;
+                let time_end = now;
+
+                tracing::info!(
+                    "Epoch commit: namespaces={} time_range=[{}, {}]",
+                    namespaces.len(),
+                    time_start,
+                    time_end
+                );
+
+                if let Err(e) = Self::do_commit_batch(
+                    &storage,
+                    &accumulator,
+                    &archive_storage,
+                    namespaces,
+                    time_start,
+                    time_end,
+                )
+                .await
+                {
+                    tracing::error!("Epoch commit failed: {}", e);
+                }
+
+                namespaces_map.clear();
+                *epoch_start = now;
+            }
+        });
 
         let (tx, rx) = kanal::unbounded_async::<UpstreamData>();
 
@@ -129,6 +214,11 @@ impl RootSmith {
                         hex::encode(&record.key[..8])
                     );
 
+                    {
+                        let mut namespaces = self.active_namespaces.lock().await;
+                        namespaces.insert(record.namespace, true);
+                    }
+
                     let storage = self.storage.lock().await;
                     storage.put(Storable::Record(record))?;
                     tracing::info!("Stored in RocksDB");
@@ -138,5 +228,130 @@ impl RootSmith {
         }
 
         self.upstream.close().await
+    }
+
+    async fn do_commit_batch(
+        storage: &Arc<tokio::sync::Mutex<StorageManager>>,
+        accumulator: &Arc<tokio::sync::Mutex<AccumulatorVariant>>,
+        archive_storage: &Arc<ArchiveVariant>,
+        namespaces: Vec<Namespace>,
+        time_start: u64,
+        time_end: u64,
+    ) -> anyhow::Result<[u8; 16]> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time before UNIX_EPOCH")
+            .as_secs();
+
+        let batch_id = generate_batch_id(&namespaces, time_start, time_end);
+        tracing::info!(
+            "Creating batch: id={} namespaces={} time_range=[{}, {}]",
+            hex::encode(&batch_id[..8]),
+            namespaces.len(),
+            time_start,
+            time_end
+        );
+
+        let storage = storage.lock().await;
+
+        storage
+            .batches()
+            .create(batch_id, namespaces.clone(), time_start, time_end, now)?;
+
+        let records = storage.batches().get_records(&batch_id, storage.records())?;
+        let record_count = records.len() as u64;
+
+        tracing::info!(
+            "Batch {} has {} records",
+            hex::encode(&batch_id[..8]),
+            record_count
+        );
+
+        if records.is_empty() {
+            tracing::warn!("No records found for batch, skipping commit");
+            storage
+                .batches()
+                .update_status(&batch_id, BatchStatus::Failed, now)?;
+            return Ok(batch_id);
+        }
+
+        storage
+            .batches()
+            .update_record_count(&batch_id, record_count, now)?;
+
+        let (result_tx, result_rx) = kanal::unbounded_async::<CommitmentResult>();
+
+        let acc = accumulator.lock().await;
+        let job_id = acc.commit(&records, result_tx).await?;
+        drop(acc);
+
+        match job_id {
+            Some(external_job_id) => {
+                tracing::info!(
+                    "External job submitted: job_id={} batch_id={}",
+                    external_job_id,
+                    hex::encode(&batch_id[..8])
+                );
+
+                storage
+                    .batches()
+                    .set_external_job_id(&batch_id, &external_job_id, now)?;
+            }
+            None => {
+                let result = result_rx
+                    .recv()
+                    .await
+                    .map_err(|e| anyhow::anyhow!("Failed to receive commitment result: {}", e))?;
+
+                tracing::info!(
+                    "Local commitment complete: root={} items={}",
+                    hex::encode(&result.commitment.root[..8]),
+                    result.item_count
+                );
+
+                let commitment_id = storage.commitments().store(
+                    result.commitment.root,
+                    result.commitment.namespaces,
+                    batch_id,
+                    time_start,
+                    time_end,
+                    record_count,
+                    result.timestamp,
+                    result.proofs,
+                )?;
+
+                storage
+                    .batches()
+                    .mark_committed(&batch_id, &commitment_id, now)?;
+
+                // Archive records per namespace
+                let records = storage.batches().get_records(&batch_id, storage.records())?;
+                let archive = Arc::clone(archive_storage);
+                let records = records;
+                tokio::spawn(async move {
+                    if let Err(e) = Self::archive_records(&*archive, &records, time_end).await {
+                        tracing::warn!("Archive failed: {}", e);
+                    }
+                });
+            }
+        }
+
+        Ok(batch_id)
+    }
+
+    async fn archive_records(
+        archive: &dyn ArchiveStorage,
+        records: &[Record],
+        timestamp: u64,
+    ) -> anyhow::Result<()> {
+        let mut by_ns: HashMap<Namespace, Vec<Record>> = HashMap::new();
+        for r in records {
+            by_ns.entry(r.namespace).or_default().push(r.clone());
+        }
+        for (ns, recs) in by_ns {
+            let data = ArchiveData::Json(serde_json::to_value(recs)?);
+            archive.archive(ns, timestamp, data).await?;
+        }
+        Ok(())
     }
 }

@@ -8,16 +8,30 @@ services:
     container_name: rootsmith-dev
     ports:
       - "8000:8000"
+      - "9000:9000"
     environment:
       - RUST_LOG=info
       - RUST_BACKTRACE=1
     volumes:
       - ./data:/app/data
       - ./tests:/app/tests
+      - ./examples:/app/examples
+      - ./config.external.toml:/app/config.toml
     command: >
-      rootsmith
-      --wasm-plugin-path tests/plugins/client.wasm
-      --zk-service-url http://host.docker.internal:3000
-      --upstream-bind 0.0.0.0:8000
+      rootsmith --config config.toml
+    depends_on:
+      - mock-external
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+  mock-external:
+    image: python:3.11-slim
+    container_name: mock-external-dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./mock_external_service.py:/app/mock_external_service.py
+    working_dir: /app
+    environment:
+      - ROOTSMITH_WEBHOOK_URL=http://rootsmith:9000/webhook/commitment
+    command: python mock_external_service.py

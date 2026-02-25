@@ -14,12 +14,19 @@ pub struct Config {
 
     pub source_path: String,
 
+    pub wasm_output_dir: String,
+
     pub accumulator: AccumulatorConfig,
 
     pub archive: ArchiveConfig,
 
     pub downstream: DownstreamConfig,
-    // TODO: rest goes here
+
+    pub epoch_duration_secs: u64,
+
+    /// Optional URL for rootsmith to POST commitment results (e.g. for integration testing).
+    #[serde(default)]
+    pub client_callback_url: Option<String>,
 }
 
 impl Default for Config {
@@ -28,6 +35,7 @@ impl Default for Config {
             storage_path: "./data".to_string(),
             http_port: 9000,
             source_path: "./examples/plugin/src/lib.rs".to_string(),
+            wasm_output_dir: "./examples/output".to_string(),
             upstream: UpstreamConfig::Http {
                 port: 8080,
                 api_key: None,
@@ -37,6 +45,8 @@ impl Default for Config {
                 directory: "./archive".to_string(),
             },
             downstream: DownstreamConfig::Blackhole,
+            epoch_duration_secs: 60,
+            client_callback_url: None,
         }
     }
 }

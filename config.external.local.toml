@@ -1,9 +1,9 @@
+# Config for testing with external accumulator (local dev, not docker)
 storage_path = "./data"
-epoch_duration_secs = 10
 http_port = 9000
-client_callback_url = "http://localhost:3001/webhook"
 source_path = "./examples/plugin/src/client.rs"
 wasm_output_dir = "./examples/output"
+epoch_duration_secs = 10
 
 [upstream.http]
 port = 8000

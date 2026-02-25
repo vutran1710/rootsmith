@@ -18,6 +18,7 @@ use super::RecordStorage;
 use super::types::Entity;
 use super::types::Filter;
 use super::BATCH_PREFIX;
+use super::JOB_INDEX_PREFIX;
 
 pub type BatchId = [u8; 16];
 pub type CommitmentId = [u8; 32];
@@ -53,6 +54,8 @@ pub struct BatchMetadata {
     pub updated_at: u64,
     /// Links to commitment after processing
     pub commitment_id: Option<CommitmentId>,
+    /// External job ID from external accumulator service (for webhook lookup)
+    pub external_job_id: Option<String>,
 }
 
 mod key_layout {
@@ -68,6 +71,13 @@ fn make_batch_key(batch_id: &BatchId) -> BatchKey {
     let mut key = [0u8; BATCH_KEY_SIZE];
     key[0] = BATCH_PREFIX;
     key[1..17].copy_from_slice(batch_id);
+    key
+}
+
+fn make_job_index_key(external_job_id: &str) -> Vec<u8> {
+    let mut key = Vec::with_capacity(1 + external_job_id.len());
+    key.push(JOB_INDEX_PREFIX);
+    key.extend_from_slice(external_job_id.as_bytes());
     key
 }
 
@@ -100,6 +110,7 @@ impl BatchStorage {
             created_at,
             updated_at: created_at,
             commitment_id: None,
+            external_job_id: None,
         };
 
         let key = make_batch_key(&batch_id);
@@ -157,23 +168,99 @@ impl BatchStorage {
     }
 
     /// Mark batch as committed with the commitment ID.
+    /// Also removes the job index entry if external_job_id is set.
     pub fn mark_committed(
         &self,
         batch_id: &BatchId,
         commitment_id: &CommitmentId,
         timestamp: u64,
     ) -> Result<bool> {
-        let key = make_batch_key(batch_id);
-        if let Some(value) = self.db.get(&key)? {
+        let batch_key = make_batch_key(batch_id);
+        if let Some(value) = self.db.get(&batch_key)? {
             let mut metadata: BatchMetadata = postcard::from_bytes(&value)?;
+
+            // Prepare index cleanup if external_job_id exists
+            let index_key = metadata
+                .external_job_id
+                .as_ref()
+                .map(|id| make_job_index_key(id));
+
+            // Update metadata
             metadata.status = BatchStatus::Committed;
             metadata.commitment_id = Some(*commitment_id);
             metadata.updated_at = timestamp;
-            let new_value = postcard::to_allocvec(&metadata)?;
-            self.db.put(&key, &new_value)?;
+
+            // Atomic: update batch + delete job index
+            let mut batch = rocksdb::WriteBatch::default();
+            batch.put(&batch_key, postcard::to_allocvec(&metadata)?);
+            if let Some(key) = index_key {
+                batch.delete(&key);
+            }
+            self.db.write(batch)?;
+
             return Ok(true);
         }
         Ok(false)
+    }
+
+    /// Link external job ID to batch (called after submitting to external service).
+    /// Creates a secondary index for webhook lookup.
+    pub fn set_external_job_id(
+        &self,
+        batch_id: &BatchId,
+        external_job_id: &str,
+        timestamp: u64,
+    ) -> Result<bool> {
+        let batch_key = make_batch_key(batch_id);
+
+        if let Some(value) = self.db.get(&batch_key)? {
+            let mut metadata: BatchMetadata = postcard::from_bytes(&value)?;
+
+            // Update metadata
+            metadata.external_job_id = Some(external_job_id.to_string());
+            metadata.status = BatchStatus::Processing;
+            metadata.updated_at = timestamp;
+
+            // Write index: job_id → batch_id
+            let index_key = make_job_index_key(external_job_id);
+
+            // Atomic write both
+            let mut batch = rocksdb::WriteBatch::default();
+            batch.put(&batch_key, postcard::to_allocvec(&metadata)?);
+            batch.put(&index_key, batch_id);
+            self.db.write(batch)?;
+
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    /// Lookup batch by external job ID (used by webhook handler).
+    pub fn get_by_external_job_id(&self, external_job_id: &str) -> Result<Option<BatchMetadata>> {
+        let index_key = make_job_index_key(external_job_id);
+
+        // Step 1: Get batch_id from index
+        let batch_id = match self.db.get(&index_key)? {
+            Some(value) => {
+                let mut id = [0u8; 16];
+                if value.len() != 16 {
+                    return Ok(None);
+                }
+                id.copy_from_slice(&value);
+                id
+            }
+            None => return Ok(None),
+        };
+
+        // Step 2: Get BatchMetadata from primary
+        self.get(&batch_id)
+    }
+
+    /// Remove job index entry (cleanup after failure/expiry).
+    pub fn remove_job_index(&self, external_job_id: &str) -> Result<()> {
+        let index_key = make_job_index_key(external_job_id);
+        self.db.delete(&index_key)?;
+        Ok(())
     }
 
     /// Get all records for a batch by querying the record storage.
