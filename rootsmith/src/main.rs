@@ -4,6 +4,7 @@ use anyhow::Result;
 use clap::Parser;
 use tracing::info;
 
+use rootsmith::accumulator::AccumulatorConfig;
 use rootsmith::config::Config;
 use rootsmith::rootsmith::RootSmith;
 use rootsmith::telemetry;
@@ -37,24 +38,17 @@ async fn main() -> Result<()> {
     };
 
     info!("Loaded configuration: {:?}", config);
-
-    let plugin_path = PathBuf::from(&config.plugin_path);
-
-    if !plugin_path.exists() {
-        anyhow::bail!("Plugin file not found: {:?}", plugin_path);
+    match &config.accumulator {
+        AccumulatorConfig::Merkle => info!("Using accumulator: merkle (local)"),
+        AccumulatorConfig::SparseMerkle => info!("Using accumulator: sparse_merkle (local)"),
+        AccumulatorConfig::External(_) => info!("Using accumulator: external (webhook flow)"),
     }
 
-    if plugin_path.extension().map_or(false, |ext| ext == "wasm") {
-        info!("Loading WASM plugin: {:?}", plugin_path);
-    } else {
-        anyhow::bail!("Plugin must be a .wasm file, got: {:?}", plugin_path);
-    }
-
-    let rootsmith = RootSmith::initialize(config).await;
+    let mut rootsmith = RootSmith::initialize(config).await?;
     tracing::info!("RootSmith initialized successfully");
 
-    return rootsmith.run().await.map_err(|e| {
+    rootsmith.run().await.map_err(|e| {
         tracing::error!("RootSmith encountered an error: {:?}", e);
         e
-    });
+    })
 }

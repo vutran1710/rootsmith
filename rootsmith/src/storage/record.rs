@@ -1,7 +1,8 @@
+//! Record storage implementation using RocksDB.
+
 use std::sync::Arc;
 
 use anyhow::Result;
-use rocksdb::Options;
 use rocksdb::WriteBatch;
 use rocksdb::DB;
 use serde::Deserialize;
@@ -12,27 +13,27 @@ use crate::types::Namespace;
 use crate::types::Record;
 use crate::types::UpstreamData;
 
+use super::types::Filter;
+use super::RECORD_PREFIX;
+
 mod key_layout {
-    pub const NAMESPACE_OFFSET: usize = 0;
+    pub const PREFIX_SIZE: usize = 1;
+    pub const NAMESPACE_OFFSET: usize = PREFIX_SIZE;
     pub const NAMESPACE_SIZE: usize = 16;
     pub const KEY_OFFSET: usize = NAMESPACE_OFFSET + NAMESPACE_SIZE;
     pub const KEY_SIZE: usize = 16;
     pub const TIMESTAMP_OFFSET: usize = KEY_OFFSET + KEY_SIZE;
     pub const TIMESTAMP_SIZE: usize = 8;
     pub const TOTAL_SIZE: usize = TIMESTAMP_OFFSET + TIMESTAMP_SIZE;
-    pub const NAMESPACE_KEY_PREFIX_SIZE: usize = NAMESPACE_SIZE + KEY_SIZE;
+    /// Prefix + namespace size for namespace-only queries
+    pub const NAMESPACE_PREFIX_SIZE: usize = PREFIX_SIZE + NAMESPACE_SIZE;
+    /// Prefix + namespace + key size for key-specific queries
+    pub const NAMESPACE_KEY_PREFIX_SIZE: usize = PREFIX_SIZE + NAMESPACE_SIZE + KEY_SIZE;
 }
 
 use key_layout::*;
 
 type StorageKey = [u8; TOTAL_SIZE];
-
-#[derive(Debug, Clone)]
-pub struct StorageQueryFilter {
-    pub namespace: Namespace,
-    pub time_range: Option<(u64, u64)>,
-    pub key: Option<Key16>,
-}
 
 #[derive(Serialize, Deserialize)]
 struct PackedValue {
@@ -50,6 +51,7 @@ impl From<&Record> for StoredRecord {
     fn from(record: &Record) -> Self {
         let key: StorageKey = {
             let mut storage_key = [0u8; TOTAL_SIZE];
+            storage_key[0] = RECORD_PREFIX;
             storage_key[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(&record.namespace);
             storage_key[KEY_OFFSET..TIMESTAMP_OFFSET].copy_from_slice(&record.key);
             storage_key[TIMESTAMP_OFFSET..TOTAL_SIZE]
@@ -93,6 +95,9 @@ impl From<StoredRecord> for Record {
             (namespace_bytes, key_bytes, timestamp)
         };
 
+        // Verify prefix (debug assertion)
+        debug_assert_eq!(stored.key[0], RECORD_PREFIX);
+
         let (value, metadata) = {
             let PackedValue {
                 data: raw_data,
@@ -129,17 +134,14 @@ impl From<StoredRecord> for Record {
     }
 }
 
-pub struct Storage {
+/// Storage for upstream records using RocksDB.
+pub struct RecordStorage {
     db: Arc<DB>,
 }
 
-impl Storage {
-    pub fn open(path: &str) -> Result<Self> {
-        let mut opts = Options::default();
-        opts.create_if_missing(true);
-        opts.set_max_open_files(-1);
-        let db = DB::open(&opts, path)?;
-        Ok(Self { db: Arc::new(db) })
+impl RecordStorage {
+    pub fn new(db: Arc<DB>) -> Self {
+        Self { db }
     }
 
     pub fn put(&self, record: &Record) -> Result<()> {
@@ -165,6 +167,7 @@ impl Storage {
         timestamp: u64,
     ) -> Result<Option<Record>> {
         let mut storage_key = [0u8; TOTAL_SIZE];
+        storage_key[0] = RECORD_PREFIX;
         storage_key[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(namespace);
         storage_key[KEY_OFFSET..TIMESTAMP_OFFSET].copy_from_slice(key);
         storage_key[TIMESTAMP_OFFSET..TOTAL_SIZE].copy_from_slice(&timestamp.to_be_bytes());
@@ -187,6 +190,7 @@ impl Storage {
 
     pub fn get_all_versions(&self, namespace: &Namespace, key: &Key16) -> Result<Vec<Record>> {
         let mut prefix = [0u8; NAMESPACE_KEY_PREFIX_SIZE];
+        prefix[0] = RECORD_PREFIX;
         prefix[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(namespace);
         prefix[KEY_OFFSET..NAMESPACE_KEY_PREFIX_SIZE].copy_from_slice(key);
 
@@ -211,32 +215,7 @@ impl Storage {
         Ok(results)
     }
 
-    pub fn query_namespace(&self, namespace: &Namespace) -> Result<Vec<Record>> {
-        let mut prefix = [0u8; NAMESPACE_SIZE];
-        prefix.copy_from_slice(namespace);
-
-        let mut results = Vec::new();
-        let iter = self.db.prefix_iterator(&prefix);
-
-        for item in iter {
-            let (k, value) = item?;
-            if !k.starts_with(&prefix) {
-                break;
-            }
-            let mut storage_key = [0u8; TOTAL_SIZE];
-            storage_key.copy_from_slice(&k);
-            let record: Record = StoredRecord {
-                key: storage_key,
-                value: value.to_vec(),
-            }
-            .into();
-            results.push(record);
-        }
-
-        Ok(results)
-    }
-
-    pub fn query(&self, filter: &StorageQueryFilter) -> Result<Vec<Record>> {
+    pub fn query(&self, filter: &Filter) -> Result<Vec<Record>> {
         let prefix = self.build_prefix(filter)?;
         let mut results = Vec::new();
 
@@ -263,14 +242,14 @@ impl Storage {
         Ok(results)
     }
 
-    pub fn delete(&self, filter: &StorageQueryFilter) -> Result<u64> {
+    pub fn delete(&self, filter: &Filter) -> Result<u64> {
         let prefix = self.build_prefix(filter)?;
         let mut count = 0;
         let mut batch = WriteBatch::default();
         let iter = self.db.prefix_iterator(&prefix);
 
         for item in iter {
-            let (k, _value) = item?;
+            let (k, value) = item?;
             if !k.starts_with(&prefix) {
                 break;
             }
@@ -279,7 +258,7 @@ impl Storage {
             storage_key.copy_from_slice(&k);
             let record: Record = StoredRecord {
                 key: storage_key,
-                value: _value.to_vec(),
+                value: value.to_vec(),
             }
             .into();
 
@@ -296,31 +275,38 @@ impl Storage {
         Ok(count)
     }
 
-    fn build_prefix(&self, filter: &StorageQueryFilter) -> Result<Vec<u8>> {
+    fn build_prefix(&self, filter: &Filter) -> Result<Vec<u8>> {
+        let namespace = filter.namespace.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Record query requires a namespace"))?;
+
         if let Some(key) = &filter.key {
             let mut prefix = [0u8; NAMESPACE_KEY_PREFIX_SIZE];
-            prefix[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(&filter.namespace);
+            prefix[0] = RECORD_PREFIX;
+            prefix[NAMESPACE_OFFSET..KEY_OFFSET].copy_from_slice(namespace);
             prefix[KEY_OFFSET..NAMESPACE_KEY_PREFIX_SIZE].copy_from_slice(key);
             Ok(prefix.to_vec())
         } else {
-            let mut prefix = [0u8; NAMESPACE_SIZE];
-            prefix.copy_from_slice(&filter.namespace);
+            let mut prefix = [0u8; NAMESPACE_PREFIX_SIZE];
+            prefix[0] = RECORD_PREFIX;
+            prefix[1..NAMESPACE_PREFIX_SIZE].copy_from_slice(namespace);
             Ok(prefix.to_vec())
         }
     }
 
-    fn matches_filter(&self, record: &Record, filter: &StorageQueryFilter) -> bool {
-        if record.namespace != filter.namespace {
-            return false;
+    fn matches_filter(&self, record: &Record, filter: &Filter) -> bool {
+        if let Some(namespace) = &filter.namespace {
+            if record.namespace != *namespace {
+                return false;
+            }
         }
 
-        if let Some(ref key) = filter.key {
+        if let Some(key) = &filter.key {
             if record.key != *key {
                 return false;
             }
         }
 
-        if let Some((start, end)) = filter.time_range {
+        if let (Some(start), Some(end)) = (filter.time_start, filter.time_end) {
             if record.timestamp < start || record.timestamp > end {
                 return false;
             }

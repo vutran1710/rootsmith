@@ -45,7 +45,7 @@ impl Accumulator for MerkleAccumulator {
         &self,
         records: &[Record],
         result_tx: AsyncSender<CommitmentResult>,
-    ) -> Result<()> {
+    ) -> Result<Option<String>> {
         let mut leaves = self.leaves.lock().await;
 
         // Add all records to the accumulator
@@ -82,6 +82,7 @@ impl Accumulator for MerkleAccumulator {
             .await
             .map_err(|e| anyhow::anyhow!("Failed to send commitment result: {}", e))?;
 
-        Ok(())
+        // Local accumulator produces immediate result, no job_id needed
+        Ok(None)
     }
 }

@@ -61,7 +61,7 @@ pub enum UpstreamConfig {
 impl UpstreamVariant {
     pub fn new(config: UpstreamConfig) -> Self {
         match config {
-            UpstreamConfig::Http { port, api_key } => UpstreamVariant::Http(Http { port, api_key }),
+            UpstreamConfig::Http { port, api_key } => UpstreamVariant::Http(Http::new(port, api_key)),
             UpstreamConfig::WebSocket { port, api_key } => {
                 UpstreamVariant::WebSocket(WebSocketSource::new(port, api_key))
             }
